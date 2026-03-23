@@ -172,11 +172,12 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             df         = await fetch_candles(pair, timeframe)
             indicators = compute_indicators(df)
-            signal_text = await analyze_and_signal(pair, timeframe, indicators, lang)
+            signal_text, is_wait = await analyze_and_signal(pair, timeframe, indicators, lang)
 
-            # تسجيل الاستخدام
-            direction = "BUY" if "BUY" in signal_text.upper() else "SELL" if "SELL" in signal_text.upper() else "WAIT"
-            db.log_signal(user_id, pair, timeframe, direction)
+            # تسجيل الاستخدام فقط إذا كانت توصية حقيقية
+            if not is_wait:
+                direction = "BUY" if "شراء" in signal_text or "BUY" in signal_text.upper() else "SELL"
+                db.log_signal(user_id, pair, timeframe, direction)
 
             pro  = db.is_pro(user_id)
             used = db.free_signals_used(user_id)
