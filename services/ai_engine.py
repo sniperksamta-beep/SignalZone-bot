@@ -4,15 +4,12 @@ No library version issues — pure HTTP calls.
 """
 
 import re
-import json
 import aiohttp
 from bs4 import BeautifulSoup
-from config import GEMINI_KEY
+from config import GROQ_KEY
 
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    f"gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
-)
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
 
 async def extract_from_url(url: str) -> str:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; FlarepostsBot/1.0)"}
