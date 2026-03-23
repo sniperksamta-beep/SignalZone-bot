@@ -1,118 +1,109 @@
-"""
-services/ai_engine.py
-يأخذ المؤشرات التقنية الحقيقية ويولّد توصية تداول دقيقة.
-"""
-
 import json
 import aiohttp
 from config import GROQ_KEY, PAIRS, TIMEFRAMES
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-SYSTEM_AR = """أنت محلل تقني محترف متخصص في أسواق الفوركس والذهب والعملات الرقمية.
-تحلل البيانات التقنية الحقيقية وتعطي توصيات دقيقة بناءً على التقاطع بين عدة مؤشرات.
-أهم معاييرك:
-- تعطي الأولوية لنقطة الدخول القريبة من السعر الحالي (لا تعطي دخولاً بعيداً)
-- وقف الخسارة يكون خلف أقرب مستوى دعم/مقاومة بهامش أمان صغير
-- هدفا الربح يستندان إلى مستويات فيبوناتشي أو مقاومات/دعوم حقيقية
-- تحدد قوة التوصية ونسبة المخاطرة/المكافأة
-- لا تعطي توصية إذا كان السوق متذبذباً بدون اتجاه واضح"""
+SYSTEM_AR = """أنت محلل تقني محترف. تعطي توصيات تداول مختصرة ودقيقة.
+قواعدك الصارمة:
+- نقطة الدخول يجب أن تكون قريبة جداً من السعر الحالي (فرق لا يتجاوز 0.3% للفوركس، 0.5% للذهب، 1% للكريبتو)
+- إذا لم يكن هناك فرصة واضحة قل WAIT بوضوح
+- لا تكتب شروحات طويلة — فقط الأرقام والمعلومات الضرورية"""
 
-SYSTEM_EN = """You are a professional technical analyst specializing in forex, gold, and crypto markets.
-You analyze real technical data and give precise trading signals based on confluence of multiple indicators.
-Your key principles:
-- Entry price must be CLOSE to current price (not far away)
-- Stop loss is placed behind the nearest support/resistance with a small safety margin
-- Two take profit targets based on real fibonacci levels or S&R zones
-- You specify signal strength and risk/reward ratio
-- You do NOT give a signal if the market is ranging/choppy without clear direction"""
+SYSTEM_EN = """You are a professional technical analyst. You give concise, precise trading signals.
+Strict rules:
+- Entry must be very close to current price (max 0.3% diff for forex, 0.5% for gold, 1% for crypto)
+- If no clear opportunity, say WAIT clearly
+- No long explanations — only numbers and essential info"""
 
-PROMPT_AR = """حلل البيانات التقنية التالية لزوج {pair_name} على إطار {timeframe_name}:
+PROMPT_AR = """بيانات {pair_name} على {timeframe_name}:
+السعر الحالي: {current_price}
+RSI: {rsi} | MACD: {macd_cross} | EMA: {ema_trend}
+Stoch K/D: {stoch_k}/{stoch_d}
+BB: {bb_lower} / {bb_mid} / {bb_upper}
+ATR: {atr}
+دعم: {supports}
+مقاومة: {resistances}
+فيبوناتشي 0.382: {fib382} | 0.618: {fib618}
+آخر 5 شمعات: {last_candles}
 
-{data}
+أعطني التوصية بهذا التنسيق فقط — لا تضف أي نص خارجه:
 
-بناءً على هذه البيانات، قدّم توصية تداول بالتنسيق التالي بالضبط:
+⚡ الإشارة: [BUY 🟢 / SELL 🔴 / WAIT ⚪]
+💰 الدخول: [سعر قريب من {current_price}]
+🛡 وقف الخسارة: [سعر]
+🎯 هدف 1: [سعر]
+🎯 هدف 2: [سعر]
+📊 نسبة R/R: [مثال 1:2.5]
+💪 قوة التوصية: [ضعيفة / متوسطة / قوية / قوية جداً]
+📝 السبب: [جملة واحدة فقط تذكر أهم مؤشرين]
+⚠️ تحذير: [جملة واحدة إن وجد]"""
 
-🔍 **التحليل:**
-[3-5 جمل تشرح ما تراه في المؤشرات — اذكر الأرقام الحقيقية من البيانات]
+PROMPT_EN = """Data for {pair_name} on {timeframe_name}:
+Current Price: {current_price}
+RSI: {rsi} | MACD: {macd_cross} | EMA: {ema_trend}
+Stoch K/D: {stoch_k}/{stoch_d}
+BB: {bb_lower} / {bb_mid} / {bb_upper}
+ATR: {atr}
+Support: {supports}
+Resistance: {resistances}
+Fib 0.382: {fib382} | 0.618: {fib618}
+Last 5 candles: {last_candles}
 
-📊 **التقاطعات:**
-[اذكر المؤشرات التي تتفق على نفس الاتجاه]
+Give the signal in this format ONLY — no extra text:
 
-⚡ **الإشارة:** BUY أو SELL أو WAIT (إذا لا توجد فرصة واضحة)
-
-💰 **نقطة الدخول:** [سعر قريب من الحالي مع شرح]
-🛡️ **وقف الخسارة:** [سعر + عدد النقاط/البيبس]
-🎯 **هدف الربح 1:** [سعر + عدد النقاط/البيبس]
-🎯 **هدف الربح 2:** [سعر + عدد النقاط/البيبس]
-
-📈 **نسبة المخاطرة/المكافأة:** [مثال 1:2.5]
-💪 **قوة التوصية:** [ضعيفة / متوسطة / قوية / قوية جداً]
-⚠️ **تحذير:** [أي ملاحظات مهمة]"""
-
-PROMPT_EN = """Analyze the following technical data for {pair_name} on {timeframe_name} timeframe:
-
-{data}
-
-Based on this data, provide a trading signal in this EXACT format:
-
-🔍 **Analysis:**
-[3-5 sentences explaining what you see in the indicators — mention real numbers from data]
-
-📊 **Confluences:**
-[List the indicators that agree on the same direction]
-
-⚡ **Signal:** BUY or SELL or WAIT (if no clear opportunity)
-
-💰 **Entry Price:** [Price close to current with explanation]
-🛡️ **Stop Loss:** [Price + pips/points]
-🎯 **Take Profit 1:** [Price + pips/points]
-🎯 **Take Profit 2:** [Price + pips/points]
-
-📈 **Risk/Reward Ratio:** [Example 1:2.5]
-💪 **Signal Strength:** [Weak / Medium / Strong / Very Strong]
-⚠️ **Warning:** [Any important notes]"""
+⚡ Signal: [BUY 🟢 / SELL 🔴 / WAIT ⚪]
+💰 Entry: [price close to {current_price}]
+🛡 Stop Loss: [price]
+🎯 TP1: [price]
+🎯 TP2: [price]
+📊 R/R Ratio: [e.g. 1:2.5]
+💪 Signal Strength: [Weak / Medium / Strong / Very Strong]
+📝 Reason: [one sentence mentioning the 2 main indicators]
+⚠️ Warning: [one sentence if any]"""
 
 
 async def analyze_and_signal(pair: str, timeframe: str, indicators: dict, lang: str = "ar") -> str:
-    """
-    يأخذ نتائج المؤشرات ويولّد توصية تداول.
-    """
     pair_info = PAIRS[pair]
     tf_info   = TIMEFRAMES[timeframe]
-
     pair_name = pair_info["name_ar"] if lang == "ar" else f"{pair}"
     tf_name   = tf_info["label_ar"]  if lang == "ar" else tf_info["label_en"]
+    fib       = indicators.get("fibonacci", {})
 
-    # نظّف البيانات للـ prompt
-    data_str = json.dumps(indicators, ensure_ascii=False, indent=2)
-
-    system = SYSTEM_AR if lang == "ar" else SYSTEM_EN
     prompt = (PROMPT_AR if lang == "ar" else PROMPT_EN).format(
-        pair_name=pair_name,
-        timeframe_name=tf_name,
-        data=data_str
+        pair_name     = pair_name,
+        timeframe_name= tf_name,
+        current_price = indicators["current_price"],
+        rsi           = indicators.get("rsi", "N/A"),
+        macd_cross    = indicators.get("macd_cross", "N/A"),
+        ema_trend     = indicators.get("ema_trend", "N/A"),
+        stoch_k       = indicators.get("stoch_k", "N/A"),
+        stoch_d       = indicators.get("stoch_d", "N/A"),
+        bb_lower      = indicators.get("bb_lower", "N/A"),
+        bb_mid        = indicators.get("bb_mid",   "N/A"),
+        bb_upper      = indicators.get("bb_upper", "N/A"),
+        atr           = indicators.get("atr", "N/A"),
+        supports      = indicators.get("supports", []),
+        resistances   = indicators.get("resistances", []),
+        fib382        = fib.get("0.382", "N/A"),
+        fib618        = fib.get("0.618", "N/A"),
+        last_candles  = indicators.get("last_5_candles", []),
     )
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_KEY}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [
-            {"role": "system", "content": system},
+            {"role": "system", "content": SYSTEM_AR if lang == "ar" else SYSTEM_EN},
             {"role": "user",   "content": prompt}
         ],
-        "max_tokens": 1500,
-        "temperature": 0.3,  # منخفض لتوصيات أكثر دقة واتساقاً
+        "max_tokens": 400,
+        "temperature": 0.2,
     }
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(
-            GROQ_URL, json=payload, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=90)
-        ) as resp:
+        async with session.post(GROQ_URL, json=payload, headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=90)) as resp:
             if resp.status != 200:
                 err = await resp.text()
                 raise ValueError(f"Groq error {resp.status}: {err[:200]}")
