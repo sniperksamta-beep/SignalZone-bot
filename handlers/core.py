@@ -1,12 +1,11 @@
 """
-handlers/core.py — /start, /help, and the main content generation flow.
+handlers/core.py — واجهة البوت الكاملة بالعربية مع تنقل سهل
 """
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 import database as db
-from config import BOT_NAME, BOT_EMOJI, FREE_USES_PER_MONTH
-
+from config import BOT_NAME, FREE_USES_PER_MONTH
 
 PLATFORM_EMOJIS = {
     "TWITTER":   "🐦",
@@ -18,308 +17,286 @@ PLATFORM_EMOJIS = {
 }
 
 PLATFORM_NAMES = {
-    "TWITTER":   "Twitter / X Thread",
-    "LINKEDIN":  "LinkedIn Post",
-    "INSTAGRAM": "Instagram Caption",
-    "YOUTUBE":   "YouTube Description",
-    "EMAIL":     "Email Newsletter",
-    "TIKTOK":    "TikTok / Reels Script",
+    "TWITTER":   "خيط تويتر / X",
+    "LINKEDIN":  "منشور لينكدإن",
+    "INSTAGRAM": "تعليق إنستغرام",
+    "YOUTUBE":   "وصف يوتيوب",
+    "EMAIL":     "نشرة بريدية",
+    "TIKTOK":    "سكريبت تيك توك",
 }
+
+# ── زر الرئيسية الثابت ─────────────────────────────────────────
+HOME_ROW = [InlineKeyboardButton("🏠 الرئيسية", callback_data="go_home")]
+
+
+def home_keyboard(extra_rows: list = None) -> InlineKeyboardMarkup:
+    """أي كيبورد + زر الرئيسية دائمًا في الأسفل."""
+    rows = extra_rows or []
+    rows.append(HOME_ROW)
+    return InlineKeyboardMarkup(rows)
+
+
+async def _send_home(target, edit: bool = False):
+    """إرسال أو تعديل رسالة الرئيسية."""
+    text = (
+        f"🔥 *Flareposts*\n\n"
+        f"أرسل لي أي شيء وسأحوّله إلى 6 منشورات جاهزة:\n\n"
+        f"🔗 رابط مقال\n"
+        f"▶️ رابط يوتيوب\n"
+        f"📝 نص أو أفكار\n\n"
+        f"*المنصات:*\n"
+        f"🐦 تويتر/X  |  💼 لينكدإن  |  📸 إنستغرام\n"
+        f"▶️ يوتيوب  |  📧 بريد  |  🎵 تيك توك"
+    )
+    keyboard = home_keyboard([
+        [
+            InlineKeyboardButton("💎 ترقية برو", callback_data="show_plans"),
+            InlineKeyboardButton("📊 إحصائياتي", callback_data="my_stats"),
+        ],
+        [InlineKeyboardButton("📖 كيف يعمل؟", callback_data="how_it_works")],
+    ])
+    if edit:
+        await target.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    else:
+        await target.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def start_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.ensure_user(user.id, user.username or "", user.full_name or "")
-
-    pro = db.is_pro(user.id)
-    used = db.uses_this_month(user.id)
-    remaining = max(0, FREE_USES_PER_MONTH - used) if not pro else "∞"
-
-    plan_badge = "⭐ PRO" if pro else f"🆓 Free ({remaining} left this month)"
-
-    text = (
-        f"{BOT_EMOJI} *Welcome to {BOT_NAME}!*\n\n"
-        f"Turn any content into 6 ready-to-post social media pieces — in 30 seconds.\n\n"
-        f"*Just send me:*\n"
-        f"🔗 Any article URL\n"
-        f"▶️ A YouTube video link\n"
-        f"📝 Raw text / notes / ideas\n\n"
-        f"*I'll generate:*\n"
-        f"🐦 Twitter/X Thread\n"
-        f"💼 LinkedIn Post\n"
-        f"📸 Instagram Caption\n"
-        f"▶️ YouTube Description\n"
-        f"📧 Email Newsletter Hook\n"
-        f"🎵 TikTok/Reels Script\n\n"
-        f"━━━━━━━━━━━━━━━━\n"
-        f"Your plan: *{plan_badge}*"
-    )
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💎 Go Pro — $8/mo", callback_data="show_plans")],
-        [
-            InlineKeyboardButton("📖 How it works", callback_data="how_it_works"),
-            InlineKeyboardButton("📊 My stats",     callback_data="my_stats"),
-        ]
-    ])
-
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    await _send_home(update.message)
 
 
 async def help_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = (
-        f"📖 *{BOT_NAME} — How to use*\n\n"
-        f"*Send anything:*\n"
-        f"• A URL → `https://example.com/article`\n"
-        f"• A YouTube link → `https://youtube.com/watch?v=...`\n"
-        f"• Plain text → just type or paste it\n\n"
-        f"*Commands:*\n"
-        f"`/start` — Home screen\n"
-        f"`/upgrade` — Go Pro\n"
-        f"`/status` — Your plan & usage\n"
-        f"`/help` — This message\n\n"
-        f"*Plans:*\n"
-        f"🆓 *Free* — {FREE_USES_PER_MONTH} generations/month\n"
-        f"⭐ *Pro* — Unlimited for $8 USDT/month\n"
-        f"💰 *3-Month* — $20 USDT (save $4)\n\n"
-        f"*Payment:* USDT TRC-20, USDT ERC-20, BTC, ETH\n"
-        f"Instant activation after you confirm payment.\n\n"
-        f"Questions? Use /support"
+        f"📖 *دليل الاستخدام*\n\n"
+        f"أرسل رابطًا أو نصًا وسيولّد البوت 6 منشورات.\n\n"
+        f"*الأوامر:*\n"
+        f"`/start` — الرئيسية\n"
+        f"`/upgrade` — الترقية إلى برو\n"
+        f"`/status` — خطتك واستخداماتك\n\n"
+        f"*الخطط:*\n"
+        f"🆓 مجاني — {FREE_USES_PER_MONTH} توليدات/شهر\n"
+        f"⭐ برو — غير محدود مقابل 8 USDT/شهر\n"
+        f"💰 3 أشهر — 20 USDT (وفّر 4$)"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(
+        text, parse_mode="Markdown",
+        reply_markup=home_keyboard([
+            [InlineKeyboardButton("💎 الترقية إلى برو", callback_data="show_plans")]
+        ])
+    )
 
 
 async def status_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.ensure_user(user.id, user.username or "", user.full_name or "")
-
     row = db.get_user(user.id)
     pro = db.is_pro(user.id)
     used_month = db.uses_this_month(user.id)
     total = row["total_uses"] if row else 0
 
-    import time
     if pro and row:
-        expires_ts = row["plan_expires"]
         import datetime
-        expires_str = datetime.datetime.fromtimestamp(expires_ts).strftime("%b %d, %Y")
-        plan_text = f"⭐ *Pro* — expires {expires_str}"
+        expires_str = datetime.datetime.fromtimestamp(row["plan_expires"]).strftime("%d %b %Y")
+        plan_text = f"⭐ *برو* — ينتهي {expires_str}"
     else:
         remaining = max(0, FREE_USES_PER_MONTH - used_month)
-        plan_text = f"🆓 *Free* — {remaining}/{FREE_USES_PER_MONTH} uses left this month"
+        plan_text = f"🆓 *مجاني* — {remaining}/{FREE_USES_PER_MONTH} متبقية"
 
     text = (
-        f"📊 *Your Stats*\n\n"
-        f"Plan: {plan_text}\n"
-        f"This month: `{used_month}` generations\n"
-        f"All time: `{total}` generations\n"
+        f"📊 *إحصائياتك*\n\n"
+        f"الخطة: {plan_text}\n"
+        f"هذا الشهر: `{used_month}` توليدات\n"
+        f"الإجمالي: `{total}` توليدات"
     )
-
-    buttons = []
-    if not pro:
-        buttons.append([InlineKeyboardButton("💎 Upgrade to Pro", callback_data="show_plans")])
-
+    extra = [] if pro else [[InlineKeyboardButton("💎 الترقية إلى برو", callback_data="show_plans")]]
     await update.message.reply_text(
         text, parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(buttons) if buttons else None
+        reply_markup=home_keyboard(extra)
     )
 
 
 async def generate_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Main handler — triggered when user sends any text/URL."""
-    user    = update.effective_user
-    text    = update.message.text.strip()
-
-    # Ignore commands
+    user = update.effective_user
+    text = update.message.text.strip()
     if text.startswith("/"):
         return
 
     db.ensure_user(user.id, user.username or "", user.full_name or "")
-
-    # Check usage limit
     pro  = db.is_pro(user.id)
     used = db.uses_this_month(user.id)
 
     if not pro and used >= FREE_USES_PER_MONTH:
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("💎 Go Pro — Unlimited", callback_data="show_plans")
-        ]])
         await update.message.reply_text(
-            f"⚠️ *You've used all {FREE_USES_PER_MONTH} free generations this month.*\n\n"
-            f"Upgrade to Pro for *unlimited* access — just $8 USDT/month.\n"
-            f"Your generations reset on the 1st of each month.",
+            f"⚠️ *استنفدت {FREE_USES_PER_MONTH} توليدات المجانية هذا الشهر.*\n\n"
+            f"قم بالترقية إلى برو للحصول على استخدام غير محدود.",
             parse_mode="Markdown",
-            reply_markup=keyboard,
+            reply_markup=home_keyboard([
+                [InlineKeyboardButton("💎 ترقية إلى برو", callback_data="show_plans")]
+            ])
         )
         return
 
-    # Show working indicator
     msg = await update.message.reply_text(
-        "⚡ *Forging your content...*\n\n"
-        "🔍 Reading source...\n"
-        "🤖 Generating 6 posts...\n"
-        "_This takes 10-20 seconds_",
+        "⚡ *جارٍ توليد المحتوى...*\n\n"
+        "🔍 قراءة المصدر...\n"
+        "🤖 توليد 6 منشورات...\n"
+        "_يستغرق هذا 10-20 ثانية_",
         parse_mode="Markdown"
     )
 
     try:
         from services.ai_engine import generate_content
         result = await generate_content(text)
-
-        # Log the generation
         db.log_generation(user.id, text[:200])
 
-        # Update status message
-        source_labels = {"url": "🔗 article", "youtube": "▶️ video", "text": "📝 text"}
-        source_label  = source_labels.get(result["source_type"], "content")
-
-        await msg.edit_text(
-            f"✅ *Done! Generated from your {source_label}.*\n\n"
-            f"Choose which post to see 👇",
-            parse_mode="Markdown",
-        )
-
-        # Store result in context for the callback
         ctx.user_data["last_result"] = result["platforms"]
-        ctx.user_data["last_source"] = text[:100]
 
-        # Show platform selector
-        buttons = []
+        source_labels = {"url": "🔗 مقال", "youtube": "▶️ فيديو", "text": "📝 نص"}
+        source_label  = source_labels.get(result["source_type"], "محتوى")
+
+        # بناء أزرار المنصات
+        platform_buttons = []
         platforms = list(result["platforms"].keys())
         for i in range(0, len(platforms), 2):
             row = []
             for p in platforms[i:i+2]:
-                emoji = PLATFORM_EMOJIS.get(p, "📄")
                 row.append(InlineKeyboardButton(
-                    f"{emoji} {p.title()}",
+                    f"{PLATFORM_EMOJIS.get(p,'')} {PLATFORM_NAMES.get(p,p)}",
                     callback_data=f"show_platform_{p}"
                 ))
-            buttons.append(row)
+            platform_buttons.append(row)
 
-        buttons.append([InlineKeyboardButton("📦 Get ALL 6 posts", callback_data="show_all")])
+        platform_buttons.append([
+            InlineKeyboardButton("📦 جميع المنشورات الـ 6", callback_data="show_all")
+        ])
 
         used_now = db.uses_this_month(user.id)
-        footer = (
-            f"\n_{'⭐ Pro — Unlimited' if pro else f'Used {used_now}/{FREE_USES_PER_MONTH} this month'}_"
-        )
+        footer = f"\n_{'⭐ برو — غير محدود' if pro else f'استخدمت {used_now}/{FREE_USES_PER_MONTH} هذا الشهر'}_"
 
-        await update.message.reply_text(
-            f"🎯 *Pick a platform:*{footer}",
+        await msg.edit_text(
+            f"✅ *تم التوليد من {source_label}!*\n\n"
+            f"اختر المنصة 👇{footer}",
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(buttons),
+            reply_markup=home_keyboard(platform_buttons)
         )
 
     except ValueError as e:
-        await msg.edit_text(f"⚠️ {e}\n\nPlease try a different URL or paste the text directly.")
-    except Exception as e:
         await msg.edit_text(
-            "❌ Something went wrong generating your content.\n"
-            "Please try again in a moment."
+            f"⚠️ {e}\n\nجرّب رابطًا آخر أو الصق النص مباشرة.",
+            reply_markup=home_keyboard()
+        )
+    except Exception:
+        await msg.edit_text(
+            "❌ حدث خطأ. الرجاء المحاولة مرة أخرى.",
+            reply_markup=home_keyboard()
         )
         raise
 
 
 async def platform_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Show a specific platform's post."""
     query = update.callback_query
     await query.answer()
-
     data = query.data
 
-    # Navigation callbacks
+    # ── الرئيسية ─────────────────────────────────────────────────
+    if data == "go_home":
+        await _send_home(query, edit=True)
+        return
+
+    # ── كيف يعمل ─────────────────────────────────────────────────
     if data == "how_it_works":
         await query.edit_message_text(
-            "🔧 *How Flareposts works:*\n\n"
-            "1️⃣ Send a URL, YouTube link, or paste text\n"
-            "2️⃣ Our AI reads and understands the content\n"
-            "3️⃣ It rewrites it natively for each platform\n"
-            "4️⃣ You pick the posts you want and copy them\n\n"
-            "Each platform post is written differently:\n"
-            "• Twitter: punchy threads\n"
-            "• LinkedIn: professional storytelling\n"
-            "• Instagram: casual + hashtags\n"
-            "• YouTube: SEO-optimized description\n"
-            "• Email: newsletter hook with CTA\n"
-            "• TikTok: spoken script with timing\n\n"
-            "Send me anything to try it! 👇",
+            "🔧 *كيف يعمل Flareposts:*\n\n"
+            "1️⃣ أرسل رابطًا أو نص يوتيوب أو نصًا\n"
+            "2️⃣ يقرأ الذكاء الاصطناعي المحتوى ويفهمه\n"
+            "3️⃣ يعيد كتابته بأسلوب كل منصة\n"
+            "4️⃣ تختار المنشورات وتنسخها\n\n"
+            "• تويتر: خيوط موجزة وجذّابة\n"
+            "• لينكدإن: سرد احترافي\n"
+            "• إنستغرام: أسلوب غير رسمي + هاشتاقات\n"
+            "• يوتيوب: وصف محسّن لـ SEO\n"
+            "• البريد: نشرة مع دعوة للعمل\n"
+            "• تيك توك: سكريبت منطوق مع توقيت",
             parse_mode="Markdown",
+            reply_markup=home_keyboard()
         )
         return
 
+    # ── إحصائيات ─────────────────────────────────────────────────
     if data == "my_stats":
-        user = query.from_user
-        row  = db.get_user(user.id)
-        pro  = db.is_pro(user.id)
-        used = db.uses_this_month(user.id)
+        user  = query.from_user
+        row   = db.get_user(user.id)
+        pro   = db.is_pro(user.id)
+        used  = db.uses_this_month(user.id)
         total = row["total_uses"] if row else 0
-
         remaining = "∞" if pro else max(0, FREE_USES_PER_MONTH - used)
-        plan_name = "⭐ Pro" if pro else "🆓 Free"
 
         await query.edit_message_text(
-            f"📊 *Your Stats*\n\n"
-            f"Plan: *{plan_name}*\n"
-            f"This month: `{used}` generations\n"
-            f"Remaining: `{remaining}`\n"
-            f"All time: `{total}` generations",
+            f"📊 *إحصائياتك*\n\n"
+            f"الخطة: *{'⭐ برو' if pro else '🆓 مجاني'}*\n"
+            f"هذا الشهر: `{used}` توليدات\n"
+            f"المتبقي: `{remaining}`\n"
+            f"الإجمالي: `{total}` توليدات",
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("⬅️ Back", callback_data="back_home")
-            ]])
+            reply_markup=home_keyboard(
+                [] if pro else [[InlineKeyboardButton("💎 ترقية إلى برو", callback_data="show_plans")]]
+            )
         )
         return
 
-    if data == "back_home":
-        await query.delete_message()
-        return
-
-    # Platform display
+    # ── عرض منصة معينة ───────────────────────────────────────────
     platforms = ctx.user_data.get("last_result", {})
-    if not platforms:
-        await query.edit_message_text(
-            "⚠️ Session expired. Please send your content again."
-        )
-        return
 
     if data == "show_all":
-        # Send all 6 posts as separate messages
-        await query.edit_message_text("📦 *Sending all 6 posts...*", parse_mode="Markdown")
+        await query.edit_message_text(
+            "📦 *إرسال جميع المنشورات...*",
+            parse_mode="Markdown",
+            reply_markup=home_keyboard()
+        )
         for platform, content in platforms.items():
             emoji = PLATFORM_EMOJIS.get(platform, "📄")
             name  = PLATFORM_NAMES.get(platform, platform)
-            header = f"{emoji} *{name}*\n{'─'*30}\n"
-            # Telegram message limit: 4096 chars
-            full_text = header + content
-            chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
-            for chunk in chunks:
+            full_text = f"{emoji} *{name}*\n{'─'*30}\n{content}"
+            for chunk in [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]:
                 await query.message.reply_text(chunk, parse_mode="Markdown")
+
+        # زر الرجوع بعد إرسال الكل
+        await query.message.reply_text(
+            "✅ *تم إرسال جميع المنشورات!*",
+            parse_mode="Markdown",
+            reply_markup=home_keyboard()
+        )
         return
 
     if data.startswith("show_platform_"):
-        platform = data.replace("show_platform_", "")
-        content  = platforms.get(platform, "Not available.")
-        emoji    = PLATFORM_EMOJIS.get(platform, "📄")
-        name     = PLATFORM_NAMES.get(platform, platform)
-
-        header = f"{emoji} *{name}*\n{'─'*30}\n"
-        full_text = header + content
-
-        # Build back + copy navigation
-        all_buttons = []
-        for p, c in platforms.items():
-            e = PLATFORM_EMOJIS.get(p, "📄")
-            all_buttons.append(
-                InlineKeyboardButton(f"{e}", callback_data=f"show_platform_{p}")
+        if not platforms:
+            await query.edit_message_text(
+                "⚠️ انتهت الجلسة. أرسل المحتوى مجددًا.",
+                reply_markup=home_keyboard()
             )
+            return
 
-        keyboard = InlineKeyboardMarkup([
-            all_buttons,
-            [InlineKeyboardButton("📦 Get ALL 6", callback_data="show_all")]
+        platform  = data.replace("show_platform_", "")
+        content   = platforms.get(platform, "غير متاح.")
+        emoji     = PLATFORM_EMOJIS.get(platform, "📄")
+        name      = PLATFORM_NAMES.get(platform, platform)
+        full_text = f"{emoji} *{name}*\n{'─'*30}\n{content}"
+
+        # أزرار التنقل بين المنصات
+        nav_buttons = [
+            InlineKeyboardButton(PLATFORM_EMOJIS.get(p, "📄"), callback_data=f"show_platform_{p}")
+            for p in platforms.keys()
+        ]
+
+        keyboard = home_keyboard([
+            nav_buttons,
+            [InlineKeyboardButton("📦 جميع المنشورات", callback_data="show_all")]
         ])
 
-        chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
-        await query.edit_message_text(
-            chunks[0], parse_mode="Markdown", reply_markup=keyboard
-        )
-        for chunk in chunks[1:]:
-            await query.message.reply_text(chunk, parse_mode="Markdown")
+        for i, chunk in enumerate([full_text[j:j+4000] for j in range(0, len(full_text), 4000)]):
+            if i == 0:
+                await query.edit_message_text(chunk, parse_mode="Markdown", reply_markup=keyboard)
+            else:
+                await query.message.reply_text(chunk, parse_mode="Markdown")
