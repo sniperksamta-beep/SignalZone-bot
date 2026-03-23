@@ -4,21 +4,21 @@ from config import GROQ_KEY, PAIRS, TIMEFRAMES
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 SYSTEM_AR = """أنت محلل تقني محترف. تعطي توصيات تداول مختصرة ودقيقة.
-قواعدك:
-- نقطة الدخول قريبة من السعر الحالي
-- الهدف الأول يجب أن يكون أبعد من وقف الخسارة (نسبة R/R لا تقل عن 1:1.5)
-- الهدف الثاني يجب أن يكون أبعد من الهدف الأول
-- إذا لم تجد فرصة واضحة اكتب انتظار بدلاً من WAIT
-- لا شروحات طويلة — فقط الأرقام والمعلومات الضرورية
+قواعدك الصارمة:
+- نقطة الدخول قريبة جداً من السعر الحالي (فرق لا يتجاوز 0.3% للفوركس، 0.5% للذهب، 1% للكريبتو)
+- وقف الخسارة خلف أقرب دعم أو مقاومة بهامش صغير
+- الهدف الأول لا يقل عن مسافة وقف الخسارة، والهدف الثاني ضعفها
+- إذا كان السوق متذبذب بدون اتجاه واضح فقط قل انتظار ⚪
+- لا شروحات طويلة — فقط الأرقام
 - اكتب كل شيء بالعربية"""
 
 SYSTEM_EN = """You are a professional technical analyst. Give concise, precise trading signals.
-Rules:
-- Entry close to current price
-- TP1 must be farther than stop loss (R/R at least 1:1.5)
-- TP2 must be farther than TP1
-- If no clear opportunity write WAIT
-- Numbers only, no long explanations"""
+Strict rules:
+- Entry must be very close to current price (max 0.3% for forex, 0.5% for gold, 1% for crypto)
+- Stop loss behind nearest support/resistance with small margin
+- TP1 at least equal to stop loss distance, TP2 double that
+- Only say WAIT if market is ranging with no clear direction
+- No long explanations — numbers only"""
 
 PROMPT_AR = """بيانات {pair_name} على {timeframe_name}:
 السعر الحالي: {current_price}
@@ -31,17 +31,17 @@ ATR: {atr}
 فيبوناتشي 0.382: {fib382} | 0.618: {fib618}
 آخر 5 شمعات: {last_candles}
 
-أعطني التوصية بهذا التنسيق فقط بالعربية الكاملة:
+أعطني التوصية بهذا التنسيق فقط:
 
 ⚡ الإشارة: [شراء 🟢 / بيع 🔴 / انتظار ⚪]
-💰 الدخول: [سعر أو لا يوجد]
+💰 الدخول: [سعر قريب من {current_price} أو لا يوجد]
 🛡 وقف الخسارة: [سعر أو لا يوجد]
 🎯 الهدف الأول: [سعر أو لا يوجد]
 🎯 الهدف الثاني: [سعر أو لا يوجد]
-📊 نسبة المخاطرة/المكافأة: [مثال 1:2.5 أو لا يوجد]
+📊 نسبة المخاطرة/المكافأة: [مثال 1:2 أو لا يوجد]
 💪 قوة التوصية: [ضعيفة / متوسطة / قوية / قوية جداً / لا يوجد]
 📝 السبب: [جملة واحدة بالعربية]
-⚠️ تحذير: [جملة واحدة بالعربية أو لا يوجد]"""
+⚠️ تحذير: [جملة واحدة أو لا يوجد]"""
 
 PROMPT_EN = """Data for {pair_name} on {timeframe_name}:
 Current Price: {current_price}
@@ -49,19 +49,19 @@ RSI: {rsi} | MACD: {macd_cross} | EMA: {ema_trend}
 Stoch K/D: {stoch_k}/{stoch_d}
 BB Lower/Mid/Upper: {bb_lower} / {bb_mid} / {bb_upper}
 ATR: {atr}
-Support levels: {supports}
-Resistance levels: {resistances}
+Support: {supports}
+Resistance: {resistances}
 Fib 0.382: {fib382} | 0.618: {fib618}
 Last 5 candles: {last_candles}
 
-Give signal in this format only:
+Signal format only:
 
 ⚡ Signal: [BUY 🟢 / SELL 🔴 / WAIT ⚪]
-💰 Entry: [price or N/A]
+💰 Entry: [price close to {current_price} or N/A]
 🛡 Stop Loss: [price or N/A]
 🎯 TP1: [price or N/A]
 🎯 TP2: [price or N/A]
-📊 R/R Ratio: [e.g. 1:2.5 or N/A]
+📊 R/R Ratio: [e.g. 1:2 or N/A]
 💪 Signal Strength: [Weak / Medium / Strong / Very Strong / N/A]
 📝 Reason: [one sentence]
 ⚠️ Warning: [one sentence or N/A]"""
@@ -117,7 +117,7 @@ async def analyze_and_signal(pair: str, timeframe: str, indicators: dict, lang: 
     is_wait = "انتظار" in result or "WAIT" in result.upper()
 
     if timeframe == "5m" and not is_wait:
-        note = "\n\n⚡ _تنبيه: فريم 5 دقائق سريع جداً — ادخل فوراً_" if lang == "ar" else "\n\n⚡ _Note: 5-min frame is very fast — enter immediately_"
+        note = "\n\n⚡ _تنبيه: فريم 5 دقائق سريع — ادخل فوراً_" if lang == "ar" else "\n\n⚡ _Note: 5-min frame is fast — enter immediately_"
         result += note
 
     return result, is_wait
