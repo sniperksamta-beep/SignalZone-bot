@@ -20,13 +20,14 @@ DB_FILE           = "tradeai.db"
 
 # الأزواج المدعومة
 PAIRS = {
-    "XAUUSD": {"name_ar": "ذهب / دولار",       "name_en": "Gold / USD",        "emoji": "🥇", "yahoo": "GC=F"},
-    "XAGUSD": {"name_ar": "فضة / دولار",        "name_en": "Silver / USD",      "emoji": "🥈", "yahoo": "SI=F"},
-    "BTCUSD": {"name_ar": "بيتكوين / دولار",   "name_en": "Bitcoin / USD",     "emoji": "₿",  "yahoo": "BTC-USD"},
-    "ETHUSD": {"name_ar": "إيثيريوم / دولار",  "name_en": "Ethereum / USD",    "emoji": "Ξ",  "yahoo": "ETH-USD"},
-    "EURUSD": {"name_ar": "يورو / دولار",       "name_en": "EUR / USD",         "emoji": "💶", "yahoo": "EURUSD=X"},
-    "USDJPY": {"name_ar": "دولار / ين",         "name_en": "USD / JPY",         "emoji": "💴", "yahoo": "JPY=X"},
+    "XAUUSD": {"name_ar": "ذهب / دولار",      "name_en": "Gold / USD",       "emoji": "🥇", "yahoo": "XAUUSD=X"},
+    "XAGUSD": {"name_ar": "فضة / دولار",       "name_en": "Silver / USD",     "emoji": "🥈", "yahoo": "XAGUSD=X"},
+    "BTCUSD": {"name_ar": "بيتكوين / دولار",  "name_en": "Bitcoin / USD",    "emoji": "₿",  "yahoo": "BTC-USD"},
+    "ETHUSD": {"name_ar": "إيثيريوم / دولار", "name_en": "Ethereum / USD",   "emoji": "Ξ",  "yahoo": "ETH-USD"},
+    "EURUSD": {"name_ar": "يورو / دولار",      "name_en": "EUR / USD",        "emoji": "💶", "yahoo": "EURUSD=X"},
+    "USDJPY": {"name_ar": "دولار / ين",        "name_en": "USD / JPY",        "emoji": "💴", "yahoo": "USDJPY=X"},
 }
+
 
 # الفريمات المدعومة
 TIMEFRAMES = {
