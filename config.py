@@ -9,7 +9,7 @@ load_dotenv()
 
 # ── Core ──────────────────────────────────────────────────────────
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
-GEMINI_KEY       = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_KEY")
+GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 
 # ── Your crypto wallets (where you receive payments) ─────────────
 YOUR_USDT_TRC20  = os.getenv("USDT_TRC20_ADDRESS", "YOUR_TRC20_WALLET")
