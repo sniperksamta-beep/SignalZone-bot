@@ -20,7 +20,7 @@ SYSTEM_AR = """أنت محلل تداول يقرأ الأسواق بطريقة �
 - Squeeze + Delta قوي = دخول مثالي
 - انهاك + رفض = انعكاس وشيك
 - سيولة منخفضة؟ قل انتظار بلا تردد
-- وقف الخسارة: ATR × 1.5 من نقطة الدخول
+- وقف الخسارة: شراء = الدخول ناقص ATR×1.5 | بيع = الدخول زائد ATR×1.5
 - الهدف: أقرب مستوى رفض تاريخي
 - اكتب كل شيء بالعربية"""
 
@@ -40,7 +40,7 @@ Rules:
 - Squeeze + strong Delta = ideal entry
 - Exhaustion + rejection = imminent reversal
 - Low liquidity session? Say WAIT without hesitation
-- Stop loss: ATR × 1.5 from entry point
+- Stop loss: BUY = Entry minus ATR×1.5 | SELL = Entry plus ATR×1.5
 - Target: nearest historical rejection level
 - Be concise — numbers only"""
 
@@ -75,7 +75,7 @@ Volatility Squeeze: {squeeze}
 ⚡ الإشارة: [شراء 🟢 / بيع 🔴 / انتظار ⚪]
 📍 المحرك: [Squeeze انفجار / رفض انعكاس / زخم قوي / انهاك / سيولة منخفضة]
 💰 الدخول: [سعر قريب جداً من {current_price}]
-🛡 وقف الخسارة: [السعر ± {sl_distance}]
+🛡 وقف الخسارة: [شراء: الدخول ناقص {sl_distance} | بيع: الدخول زائد {sl_distance}]
 🎯 الهدف الأول: [أقرب مستوى رفض]
 🎯 الهدف الثاني: [المستوى التالي]
 📊 نسبة المخاطرة/المكافأة: [مثال 1:2]
@@ -114,7 +114,7 @@ Based on Candle DNA only, give signal in this format:
 ⚡ Signal: [BUY 🟢 / SELL 🔴 / WAIT ⚪]
 📍 Driver: [Squeeze explosion / Rejection reversal / Strong momentum / Exhaustion / Low liquidity]
 💰 Entry: [price very close to {current_price}]
-🛡 Stop Loss: [price ± {sl_distance}]
+🛡 Stop Loss: [BUY: Entry minus {sl_distance} | SELL: Entry plus {sl_distance}]
 🎯 TP1: [nearest rejection level]
 🎯 TP2: [next level]
 📊 R/R Ratio: [e.g. 1:2]
@@ -161,14 +161,14 @@ async def analyze_and_signal(pair: str, timeframe: str, indicators: dict, lang: 
         None:                "No clear rejection",
     }
     exhaustion_ar = {
-        "expanding": "تمدد — زخم يتسارع",
+        "expanding":  "تمدد — زخم يتسارع",
         "exhausting": "انهاك — الزخم يضعف",
-        "normal":    "طبيعي",
+        "normal":     "طبيعي",
     }
     exhaustion_en = {
-        "expanding": "Expanding — momentum accelerating",
+        "expanding":  "Expanding — momentum accelerating",
         "exhausting": "Exhausting — momentum weakening",
-        "normal":    "Normal",
+        "normal":     "Normal",
     }
 
     squeeze_ar = f"نعم 🔥 (نسبة {dna.get('squeeze_ratio','N/A')} — انفجار وشيك)" if dna.get("is_squeeze") else f"لا (نسبة {dna.get('squeeze_ratio','N/A')})"
@@ -193,10 +193,10 @@ async def analyze_and_signal(pair: str, timeframe: str, indicators: dict, lang: 
         delta          = dna.get("last_delta",         "N/A"),
         rejection      = rejection_ar.get(dna.get("strong_rejection")) if lang == "ar" else rejection_en.get(dna.get("strong_rejection")),
         candles_detail = candles_detail,
-        consecutive    = dna.get("consecutive_candles","N/A"),
-        consistency    = dna.get("trend_consistency",  "N/A"),
-        avg_delta      = dna.get("avg_delta_5",        "N/A"),
-        exhaustion     = exhaustion_ar.get(dna.get("exhaustion","normal")) if lang=="ar" else exhaustion_en.get(dna.get("exhaustion","normal")),
+        consecutive    = dna.get("consecutive_candles", "N/A"),
+        consistency    = dna.get("trend_consistency",   "N/A"),
+        avg_delta      = dna.get("avg_delta_5",         "N/A"),
+        exhaustion     = exhaustion_ar.get(dna.get("exhaustion", "normal")) if lang == "ar" else exhaustion_en.get(dna.get("exhaustion", "normal")),
         squeeze        = squeeze_ar if lang == "ar" else squeeze_en,
         resistance     = levels.get("resistance", []),
         support        = levels.get("support",    []),
