@@ -1,4 +1,3 @@
-import json
 import aiohttp
 from config import GROQ_KEY, PAIRS, TIMEFRAMES
 
@@ -6,15 +5,21 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 SYSTEM_AR = """أنت محلل تقني محترف. تعطي توصيات تداول مختصرة ودقيقة.
 قواعدك الصارمة:
-- نقطة الدخول يجب أن تكون قريبة جداً من السعر الحالي (فرق لا يتجاوز 0.3% للفوركس، 0.5% للذهب، 1% للكريبتو)
-- إذا لم يكن هناك فرصة واضحة قل WAIT بوضوح
-- لا تكتب شروحات طويلة — فقط الأرقام والمعلومات الضرورية"""
+- نقطة الدخول قريبة من السعر الحالي (فرق لا يتجاوز 0.3% للفوركس، 0.5% للذهب، 1% للكريبتو)
+- نسبة R/R يجب أن لا تقل عن 1:1.5 — إذا كان الهدف أقرب من وقف الخسارة قل WAIT
+- الهدف 1 = مسافة وقف الخسارة × 1.5 على الأقل
+- الهدف 2 = مسافة وقف الخسارة × 2.5 على الأقل
+- إذا لم تتحقق هذه الشروط قل WAIT بوضوح
+- لا شروحات طويلة — فقط الأرقام"""
 
 SYSTEM_EN = """You are a professional technical analyst. You give concise, precise trading signals.
 Strict rules:
-- Entry must be very close to current price (max 0.3% diff for forex, 0.5% for gold, 1% for crypto)
-- If no clear opportunity, say WAIT clearly
-- No long explanations — only numbers and essential info"""
+- Entry close to current price (max 0.3% for forex, 0.5% for gold, 1% for crypto)
+- R/R ratio must be at least 1:1.5 — if target is closer than stop loss say WAIT
+- TP1 = stop loss distance x 1.5 minimum
+- TP2 = stop loss distance x 2.5 minimum
+- If these conditions are not met, say WAIT clearly
+- No long explanations — numbers only"""
 
 PROMPT_AR = """بيانات {pair_name} على {timeframe_name}:
 السعر الحالي: {current_price}
@@ -27,7 +32,9 @@ ATR: {atr}
 فيبوناتشي 0.382: {fib382} | 0.618: {fib618}
 آخر 5 شمعات: {last_candles}
 
-أعطني التوصية بهذا التنسيق فقط — لا تضف أي نص خارجه:
+تحقق أولاً: هل مسافة الهدف 1 أكبر من مسافة وقف الخسارة × 1.5؟ إذا لا، أجب بـ WAIT فقط.
+
+أعطني التوصية بهذا التنسيق فقط:
 
 ⚡ الإشارة: [BUY 🟢 / SELL 🔴 / WAIT ⚪]
 💰 الدخول: [سعر قريب من {current_price}]
@@ -36,7 +43,7 @@ ATR: {atr}
 🎯 هدف 2: [سعر]
 📊 نسبة R/R: [مثال 1:2.5]
 💪 قوة التوصية: [ضعيفة / متوسطة / قوية / قوية جداً]
-📝 السبب: [جملة واحدة فقط تذكر أهم مؤشرين]
+📝 السبب: [جملة واحدة فقط]
 ⚠️ تحذير: [جملة واحدة إن وجد]"""
 
 PROMPT_EN = """Data for {pair_name} on {timeframe_name}:
@@ -50,7 +57,9 @@ Resistance: {resistances}
 Fib 0.382: {fib382} | 0.618: {fib618}
 Last 5 candles: {last_candles}
 
-Give the signal in this format ONLY — no extra text:
+Check first: is TP1 distance greater than stop loss distance x 1.5? If not, reply WAIT only.
+
+Give the signal in this format ONLY:
 
 ⚡ Signal: [BUY 🟢 / SELL 🔴 / WAIT ⚪]
 💰 Entry: [price close to {current_price}]
@@ -59,7 +68,7 @@ Give the signal in this format ONLY — no extra text:
 🎯 TP2: [price]
 📊 R/R Ratio: [e.g. 1:2.5]
 💪 Signal Strength: [Weak / Medium / Strong / Very Strong]
-📝 Reason: [one sentence mentioning the 2 main indicators]
+📝 Reason: [one sentence only]
 ⚠️ Warning: [one sentence if any]"""
 
 
@@ -69,6 +78,11 @@ async def analyze_and_signal(pair: str, timeframe: str, indicators: dict, lang: 
     pair_name = pair_info["name_ar"] if lang == "ar" else f"{pair}"
     tf_name   = tf_info["label_ar"]  if lang == "ar" else tf_info["label_en"]
     fib       = indicators.get("fibonacci", {})
+
+    # تحذير تلقائي للفريمات الصغيرة
+    small_tf_warning = ""
+    if timeframe == "5m":
+        small_tf_warning = "\n⚠️ تنبيه: فريم 5 دقائق سريع جداً — يجب الدخول فوراً عند رؤية التوصية." if lang == "ar" else "\n⚠️ Note: 5-minute timeframe is very fast — enter immediately upon signal."
 
     prompt = (PROMPT_AR if lang == "ar" else PROMPT_EN).format(
         pair_name     = pair_name,
@@ -109,4 +123,5 @@ async def analyze_and_signal(pair: str, timeframe: str, indicators: dict, lang: 
                 raise ValueError(f"Groq error {resp.status}: {err[:200]}")
             data = await resp.json()
 
-    return data["choices"][0]["message"]["content"]
+    result = data["choices"][0]["message"]["content"]
+    return result + small_tf_warning
