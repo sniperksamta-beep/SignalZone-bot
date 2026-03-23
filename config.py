@@ -11,14 +11,13 @@ YOUR_BTC          = os.getenv("BTC_ADDRESS", "")
 
 ADMIN_IDS         = [int(x) for x in os.getenv("ADMIN_IDS", "0").split(",") if x.strip().isdigit()]
 
-FREE_SIGNALS      = 4        # توصيات مجانية للمستخدم الجديد
-PRICE_MONTHLY     = 35       # دولار شهرياً
-PRICE_3MONTH      = 90       # 3 أشهر
+FREE_SIGNALS      = 4
+PRICE_MONTHLY     = 35
+PRICE_3MONTH      = 90
 
 BOT_NAME          = "SignalsZone"
 DB_FILE           = "tradeai.db"
 
-# الأزواج المدعومة
 PAIRS = {
     "XAUUSD": {"name_ar": "ذهب / دولار",      "name_en": "Gold / USD",       "emoji": "🥇", "yahoo": "XAUUSD=X"},
     "XAGUSD": {"name_ar": "فضة / دولار",       "name_en": "Silver / USD",     "emoji": "🥈", "yahoo": "XAGUSD=X"},
@@ -28,11 +27,10 @@ PAIRS = {
     "USDJPY": {"name_ar": "دولار / ين",        "name_en": "USD / JPY",        "emoji": "💴", "yahoo": "USDJPY=X"},
 }
 
-
-# الفريمات المدعومة
 TIMEFRAMES = {
-    "15m":  {"label_ar": "15 دقيقة",  "label_en": "15 Minutes",  "yf_interval": "15m",  "yf_period": "5d"},
-    "1h":   {"label_ar": "ساعة",      "label_en": "1 Hour",      "yf_interval": "1h",   "yf_period": "1mo"},
-    "4h":   {"label_ar": "4 ساعات",   "label_en": "4 Hours",     "yf_interval": "1h",   "yf_period": "1mo"},
-    "1d":   {"label_ar": "يومي",      "label_en": "Daily",       "yf_interval": "1d",   "yf_period": "6mo"},
+    "5m":  {"label_ar": "5 دقائق",  "label_en": "5 Minutes",  "yf_interval": "5m",  "yf_period": "1d"},
+    "15m": {"label_ar": "15 دقيقة", "label_en": "15 Minutes", "yf_interval": "15m", "yf_period": "5d"},
+    "1h":  {"label_ar": "ساعة",     "label_en": "1 Hour",     "yf_interval": "1h",  "yf_period": "1mo"},
+    "4h":  {"label_ar": "4 ساعات",  "label_en": "4 Hours",    "yf_interval": "1h",  "yf_period": "1mo"},
+    "1d":  {"label_ar": "يومي",     "label_en": "Daily",      "yf_interval": "1d",  "yf_period": "6mo"},
 }
