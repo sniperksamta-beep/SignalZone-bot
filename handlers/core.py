@@ -1,11 +1,8 @@
-"""
-handlers/core.py — التدفق الكامل: اختيار اللغة → الزوج → الفريم → التوصية
-"""
-
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 import database as db
 from config import PAIRS, TIMEFRAMES, FREE_SIGNALS, BOT_NAME
+import datetime
 
 def t(user_id, ar_text, en_text):
     lang = db.get_lang(user_id)
@@ -157,11 +154,11 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         wait_text = (
             f"⏳ *جارٍ تحليل {pair_name} على {tf_name}...*\n\n"
-            f"🔍 جلب بيانات السوق الحقيقية...\n📊 حساب المؤشرات التقنية...\n🤖 تحليل الذكاء الاصطناعي...\n\n"
+            f"🔍 جلب بيانات السوق...\n📊 حساب المؤشرات...\n🤖 تحليل الذكاء الاصطناعي...\n\n"
             f"_قد يستغرق هذا دقيقة_"
             if lang == "ar" else
             f"⏳ *Analyzing {pair} on {tf_name}...*\n\n"
-            f"🔍 Fetching real market data...\n📊 Computing indicators...\n🤖 AI deep analysis...\n\n"
+            f"🔍 Fetching market data...\n📊 Computing indicators...\n🤖 AI analysis...\n\n"
             f"_This may take a minute_"
         )
         await query.edit_message_text(wait_text, parse_mode="Markdown")
@@ -170,8 +167,8 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             from services.market_data import fetch_candles, compute_indicators
             from services.ai_engine   import analyze_and_signal
 
-            df         = await fetch_candles(pair, timeframe)
-            indicators = compute_indicators(df)
+            df          = await fetch_candles(pair, timeframe)
+            indicators  = compute_indicators(df)
             signal_text, is_wait = await analyze_and_signal(pair, timeframe, indicators, lang)
 
             # تسجيل الاستخدام فقط إذا كانت توصية حقيقية
@@ -182,12 +179,25 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             pro  = db.is_pro(user_id)
             used = db.free_signals_used(user_id)
 
+            # وقت انتهاء التوصية
+            expiry_map  = {"5m": 20, "15m": 60, "1h": 240, "4h": 960, "1d": 4320}
+            expiry_mins = expiry_map.get(timeframe, 60)
+            expiry_time = (datetime.datetime.utcnow() + datetime.timedelta(minutes=expiry_mins)).strftime("%H:%M UTC")
+
             if lang == "ar":
                 header = f"📡 *توصية {pair_info['emoji']} {pair_name} — {tf_name}*\n{'━'*30}\n\n"
-                footer = f"\n\n{'━'*30}\n_{'⭐ برو — غير محدود' if pro else f'🆓 استخدمت {used}/{FREE_SIGNALS} مجانية'}_"
+                footer = (
+                    f"\n\n{'━'*30}\n"
+                    f"⏰ _صالحة حتى: {expiry_time} (خلال {expiry_mins} دقيقة)_\n"
+                    f"_{'⭐ برو — غير محدود' if pro else f'🆓 استخدمت {used}/{FREE_SIGNALS} مجانية'}_"
+                )
             else:
                 header = f"📡 *Signal: {pair_info['emoji']} {pair} — {tf_name}*\n{'━'*30}\n\n"
-                footer = f"\n\n{'━'*30}\n_{'⭐ Pro — Unlimited' if pro else f'🆓 Used {used}/{FREE_SIGNALS} free'}_"
+                footer = (
+                    f"\n\n{'━'*30}\n"
+                    f"⏰ _Valid until: {expiry_time} ({expiry_mins} min)_\n"
+                    f"_{'⭐ Pro — Unlimited' if pro else f'🆓 Used {used}/{FREE_SIGNALS} free'}_"
+                )
 
             full_text = header + signal_text + footer
             chunks    = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
