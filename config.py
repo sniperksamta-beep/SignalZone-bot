@@ -15,7 +15,7 @@ FREE_SIGNALS      = 4        # توصيات مجانية للمستخدم الج
 PRICE_MONTHLY     = 35       # دولار شهرياً
 PRICE_3MONTH      = 90       # 3 أشهر
 
-BOT_NAME          = "TradeAI"
+BOT_NAME          = "SignalsZone"
 DB_FILE           = "tradeai.db"
 
 # الأزواج المدعومة
