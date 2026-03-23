@@ -1,35 +1,37 @@
-"""
-config.py — Flareposts Bot configuration.
-Fill in your keys via environment variables or directly here.
-"""
-
 import os
 from dotenv import load_dotenv
 load_dotenv()
 
-# ── Core ──────────────────────────────────────────────────────────
-TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN")
-GROQ_KEY = os.getenv("GROQ_API_KEY", "")
+TELEGRAM_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
+GROQ_KEY          = os.getenv("GROQ_API_KEY", "")
 
-# ── Your crypto wallets (where you receive payments) ─────────────
-YOUR_USDT_TRC20  = os.getenv("USDT_TRC20_ADDRESS", "YOUR_TRC20_WALLET")
-YOUR_USDT_ERC20  = os.getenv("USDT_ERC20_ADDRESS", "YOUR_ERC20_WALLET")
-YOUR_BTC         = os.getenv("BTC_ADDRESS",         "YOUR_BTC_WALLET")
-YOUR_ETH         = os.getenv("ETH_ADDRESS",         "YOUR_ETH_WALLET")
+YOUR_USDT_TRC20   = os.getenv("USDT_TRC20_ADDRESS", "")
+YOUR_USDT_ERC20   = os.getenv("USDT_ERC20_ADDRESS", "")
+YOUR_BTC          = os.getenv("BTC_ADDRESS", "")
 
-# ── Pricing ───────────────────────────────────────────────────────
-FREE_USES_PER_MONTH   = 5          # Free tier: 5 generations/month
-PRICE_MONTHLY_USDT    = 8          # $8 USDT/month
-PRICE_3MONTH_USDT     = 20         # $20 USDT for 3 months (save $4)
-PRICE_MONTHLY_BTC     = "0.00009"  # ~$8 worth of BTC (update periodically)
+ADMIN_IDS         = [int(x) for x in os.getenv("ADMIN_IDS", "0").split(",") if x.strip().isdigit()]
 
-# ── Admin ─────────────────────────────────────────────────────────
-ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "0").split(",") if x.strip().isdigit()]
+FREE_SIGNALS      = 4        # توصيات مجانية للمستخدم الجديد
+PRICE_MONTHLY     = 35       # دولار شهرياً
+PRICE_3MONTH      = 90       # 3 أشهر
 
-# ── Branding ──────────────────────────────────────────────────────
-BOT_NAME    = "Flareposts"
-BOT_EMOJI   = "⚡"
-BOT_VERSION = "1.0.0"
+BOT_NAME          = "TradeAI"
+DB_FILE           = "tradeai.db"
 
-# ── Database ──────────────────────────────────────────────────────
-DB_FILE = "flareposts.db"
+# الأزواج المدعومة
+PAIRS = {
+    "XAUUSD": {"name_ar": "ذهب / دولار",       "name_en": "Gold / USD",        "emoji": "🥇", "yahoo": "GC=F"},
+    "XAGUSD": {"name_ar": "فضة / دولار",        "name_en": "Silver / USD",      "emoji": "🥈", "yahoo": "SI=F"},
+    "BTCUSD": {"name_ar": "بيتكوين / دولار",   "name_en": "Bitcoin / USD",     "emoji": "₿",  "yahoo": "BTC-USD"},
+    "ETHUSD": {"name_ar": "إيثيريوم / دولار",  "name_en": "Ethereum / USD",    "emoji": "Ξ",  "yahoo": "ETH-USD"},
+    "EURUSD": {"name_ar": "يورو / دولار",       "name_en": "EUR / USD",         "emoji": "💶", "yahoo": "EURUSD=X"},
+    "USDJPY": {"name_ar": "دولار / ين",         "name_en": "USD / JPY",         "emoji": "💴", "yahoo": "JPY=X"},
+}
+
+# الفريمات المدعومة
+TIMEFRAMES = {
+    "15m":  {"label_ar": "15 دقيقة",  "label_en": "15 Minutes",  "yf_interval": "15m",  "yf_period": "5d"},
+    "1h":   {"label_ar": "ساعة",      "label_en": "1 Hour",      "yf_interval": "1h",   "yf_period": "1mo"},
+    "4h":   {"label_ar": "4 ساعات",   "label_en": "4 Hours",     "yf_interval": "1h",   "yf_period": "1mo"},
+    "1d":   {"label_ar": "يومي",      "label_en": "Daily",       "yf_interval": "1d",   "yf_period": "6mo"},
+}
