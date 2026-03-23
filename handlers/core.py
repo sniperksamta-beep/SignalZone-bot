@@ -174,6 +174,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             indicators = compute_indicators(df)
             signal_text = await analyze_and_signal(pair, timeframe, indicators, lang)
 
+            # تسجيل الاستخدام
             direction = "BUY" if "BUY" in signal_text.upper() else "SELL" if "SELL" in signal_text.upper() else "WAIT"
             db.log_signal(user_id, pair, timeframe, direction)
 
