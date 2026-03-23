@@ -8,6 +8,9 @@ GROQ_KEY          = os.getenv("GROQ_API_KEY", "")
 YOUR_USDT_TRC20   = os.getenv("USDT_TRC20_ADDRESS", "")
 YOUR_USDT_ERC20   = os.getenv("USDT_ERC20_ADDRESS", "")
 YOUR_BTC          = os.getenv("BTC_ADDRESS", "")
+YOUR_ETH          = os.getenv("ETH_ADDRESS", "")
+YOUR_BNB          = os.getenv("BNB_ADDRESS", "")
+YOUR_SOL          = os.getenv("SOL_ADDRESS", "")
 
 ADMIN_IDS         = [int(x) for x in os.getenv("ADMIN_IDS", "0").split(",") if x.strip().isdigit()]
 
@@ -20,7 +23,6 @@ DB_FILE           = "tradeai.db"
 
 PAIRS = {
     "XAUUSD": {"name_ar": "ذهب / دولار",      "name_en": "Gold / USD",       "emoji": "🥇", "yahoo": "XAUUSD=X"},
-    "XAGUSD": {"name_ar": "فضة / دولار",       "name_en": "Silver / USD",     "emoji": "🥈", "yahoo": "XAGUSD=X"},
     "BTCUSD": {"name_ar": "بيتكوين / دولار",  "name_en": "Bitcoin / USD",    "emoji": "₿",  "yahoo": "BTC-USD"},
     "ETHUSD": {"name_ar": "إيثيريوم / دولار", "name_en": "Ethereum / USD",   "emoji": "Ξ",  "yahoo": "ETH-USD"},
     "EURUSD": {"name_ar": "يورو / دولار",      "name_en": "EUR / USD",        "emoji": "💶", "yahoo": "EURUSD=X"},
