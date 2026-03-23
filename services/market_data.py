@@ -17,6 +17,7 @@ TWELVE_SYMBOLS = {
 }
 
 TWELVE_INTERVALS = {
+    "5m":  "5min",
     "15m": "15min",
     "1h":  "1h",
     "4h":  "4h",
