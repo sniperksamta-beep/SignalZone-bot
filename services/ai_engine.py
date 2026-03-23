@@ -10,38 +10,63 @@ async def extract_from_url(url: str) -> str:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                html = await resp.text()
+                html = await resp.text(encoding="utf-8", errors="replace")
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script","style","nav","footer","header","aside","form","iframe"]):
             tag.decompose()
-        for sel in ["article", "main", ".post-content", ".article-body", "#content"]:
+        for sel in ["article", "main", ".post-content", ".article-body", "#content", ".content", ".entry-content"]:
             el = soup.select_one(sel)
             if el:
                 text = el.get_text(separator="\n", strip=True)
-                if len(text) > 300:
+                if len(text) > 200:
                     return text[:6000]
         text = soup.body.get_text(separator="\n", strip=True) if soup.body else soup.get_text()
-        return text[:6000]
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        return "\n".join(lines)[:6000]
     except Exception as e:
-        raise ValueError(f"Couldn't fetch that URL: {e}")
+        raise ValueError(f"تعذّر جلب الرابط: {e}")
+
 
 async def extract_youtube_transcript(url: str) -> str:
     try:
         vid_id = None
-        for pattern in [r"v=([^&]+)", r"youtu\.be/([^?]+)", r"shorts/([^?]+)"]:
+        for pattern in [r"v=([^&]+)", r"youtu\.be/([^?&]+)", r"shorts/([^?]+)"]:
             m = re.search(pattern, url)
             if m:
                 vid_id = m.group(1)
                 break
         if not vid_id:
-            raise ValueError("Invalid YouTube URL")
+            raise ValueError("رابط يوتيوب غير صالح")
+
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+            for lang in [["ar"], ["en"], None]:
+                try:
+                    if lang:
+                        transcript = YouTubeTranscriptApi.get_transcript(vid_id, languages=lang)
+                    else:
+                        transcript = YouTubeTranscriptApi.get_transcript(vid_id)
+                    text = " ".join([t["text"] for t in transcript])
+                    if len(text) > 100:
+                        return text[:6000]
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
         oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid_id}&format=json"
         async with aiohttp.ClientSession() as session:
             async with session.get(oembed_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 data = await resp.json()
-        return f"YouTube Video: {data.get('title','')}\nBy: {data.get('author_name','')}"
+        title  = data.get("title", "")
+        author = data.get("author_name", "")
+        if not title:
+            raise ValueError("تعذّر الحصول على معلومات الفيديو.")
+        return f"[معلومات محدودة — العنوان فقط، لا يوجد نص مفرغ]\nعنوان الفيديو: {title}\nالقناة: {author}\nالرابط: {url}"
+
     except Exception as e:
-        raise ValueError(f"Couldn't process that YouTube link: {e}")
+        raise ValueError(f"تعذّر معالجة رابط يوتيوب: {e}")
+
 
 def is_youtube_url(text: str) -> bool:
     return bool(re.search(r"(youtube\.com|youtu\.be)", text))
@@ -49,31 +74,40 @@ def is_youtube_url(text: str) -> bool:
 def is_url(text: str) -> bool:
     return bool(re.match(r"https?://", text.strip()))
 
-PROMPT_TEMPLATE = """You are Flareposts, an expert content repurposing AI.
-Transform the content below into 6 platform-ready social media posts.
 
-SOURCE CONTENT:
+PROMPT_TEMPLATE = """أنت خبير في إعادة توظيف المحتوى للشبكات الاجتماعية.
+
+القواعد الصارمة:
+- استخدم التفاصيل والأسماء والأحداث الحقيقية الموجودة في المحتوى المصدر فقط
+- لا تكتب أبدًا جملًا عامة مثل "اكتشف المزيد" أو "لا تفوّت" أو "تعلّم أكثر"
+- لا تخترع تفاصيل غير موجودة في المصدر
+- اكتب جميع المنشورات باللغة العربية
+- إذا كانت المعلومات محدودة، كن صادقًا واذكر ما هو متاح فقط
+- كل منشور يجب أن يذكر تفاصيل حقيقية ومحددة من المحتوى
+
+المحتوى المصدر:
 {content}
 
-Use this EXACT format:
+استخدم هذا التنسيق بالضبط — لا تضف أي نص قبله أو بعده:
 
 ---TWITTER---
-[Twitter/X thread. Hook tweet, 4-6 numbered tweets, CTA. Max 280 chars each.]
+[خيط تويتر/X. ابدأ بتغريدة جذّابة بتفصيلة حقيقية مثيرة، ثم 4-5 تغريدات مرقّمة (1/ 2/ 3/) كل منها بتفصيلة حقيقية من المحتوى. انتهِ بدعوة للتفاعل. الحد الأقصى 280 حرفًا لكل تغريدة.]
 
 ---LINKEDIN---
-[LinkedIn post. Bold opener, insight, 150-300 words, end with question.]
+[منشور لينكدإن. ابدأ بأبرز نقطة محددة من المحتوى. 150-300 كلمة. انتهِ بسؤال للنقاش.]
 
 ---INSTAGRAM---
-[Instagram caption. Opener, 3-5 sentences, 5 hashtags.]
+[تعليق إنستغرام. مقدمة جذّابة بتفصيلة حقيقية، 3-5 جمل، 5 هاشتاقات مناسبة في النهاية.]
 
 ---YOUTUBE---
-[YouTube description. SEO title, 100-word description, 5 tags.]
+[وصف يوتيوب. عنوان SEO محدد في السطر الأول، وصف 100 كلمة بتفاصيل حقيقية، ثم 5 كلمات مفتاحية.]
 
 ---EMAIL---
-[Email. Subject: ... on first line, 80-word body, CTA in brackets.]
+[بريد إلكتروني. الموضوع: ... في السطر الأول، ثم نص 80 كلمة بتفاصيل حقيقية، ودعوة للعمل بين قوسين.]
 
 ---TIKTOK---
-[TikTok script. Hook, main content, CTA with [action] notes.]"""
+[سكريبت تيك توك. خطّاف (3 ثوانٍ) بحقيقة مثيرة محددة، محتوى رئيسي (15-30 ثانية)، دعوة للعمل مع ملاحظات [action].]"""
+
 
 async def generate_content(raw_input: str) -> dict:
     if is_youtube_url(raw_input):
@@ -87,7 +121,7 @@ async def generate_content(raw_input: str) -> dict:
         source_type = "text"
 
     if len(content.strip()) < 30:
-        raise ValueError("Content is too short. Please provide more text.")
+        raise ValueError("المحتوى قصير جدًا. الرجاء إرسال نص أطول.")
 
     headers = {
         "Authorization": f"Bearer {GROQ_KEY}",
@@ -95,9 +129,18 @@ async def generate_content(raw_input: str) -> dict:
     }
     payload = {
         "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "user", "content": PROMPT_TEMPLATE.format(content=content[:5000])}],
+        "messages": [
+            {
+                "role": "system",
+                "content": "أنت خبير في إعادة توظيف المحتوى. تستخدم دائمًا التفاصيل الحقيقية من المصدر. لا تكتب أبدًا محتوى عامًا. تكتب جميع المنشورات باللغة العربية."
+            },
+            {
+                "role": "user",
+                "content": PROMPT_TEMPLATE.format(content=content[:5000])
+            }
+        ],
         "max_tokens": 3000,
-        "temperature": 0.8
+        "temperature": 0.7
     }
 
     async with aiohttp.ClientSession() as session:
@@ -107,7 +150,7 @@ async def generate_content(raw_input: str) -> dict:
         ) as resp:
             if resp.status != 200:
                 error_text = await resp.text()
-                raise ValueError(f"Groq API error {resp.status}: {error_text[:300]}")
+                raise ValueError(f"خطأ في Groq API {resp.status}: {error_text[:300]}")
             data = await resp.json()
 
     raw_output = data["choices"][0]["message"]["content"]
@@ -119,7 +162,7 @@ async def generate_content(raw_input: str) -> dict:
         end_tag = f"---{platforms[i+1]}---" if i + 1 < len(platforms) else None
         start = raw_output.find(start_tag)
         if start == -1:
-            sections[platform] = "Could not generate this section."
+            sections[platform] = "تعذّر توليد هذا القسم."
             continue
         start += len(start_tag)
         end = raw_output.find(end_tag) if end_tag else len(raw_output)
