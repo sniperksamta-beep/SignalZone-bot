@@ -9,7 +9,6 @@ TWELVE_URL = "https://api.twelvedata.com/time_series"
 
 TWELVE_SYMBOLS = {
     "XAUUSD": "XAU/USD",
-    "XAGUSD": "XAG/USD",
     "BTCUSD": "BTC/USD",
     "ETHUSD": "ETH/USD",
     "EURUSD": "EUR/USD",
@@ -56,91 +55,238 @@ async def fetch_candles(pair: str, timeframe: str) -> pd.DataFrame:
     return df
 
 
-def compute_indicators(df: pd.DataFrame) -> dict:
-    close = df["close"]
-    high  = df["high"]
-    low   = df["low"]
+def detect_order_blocks(df: pd.DataFrame) -> dict:
+    """
+    Order Block: آخر شمعة هابطة قبل حركة صاعدة قوية (Bullish OB)
+                 أو آخر شمعة صاعدة قبل حركة هابطة قوية (Bearish OB)
+    """
+    bullish_obs = []
+    bearish_obs = []
 
-    ema8   = close.ewm(span=8,   adjust=False).mean()
-    ema21  = close.ewm(span=21,  adjust=False).mean()
-    ema50  = close.ewm(span=50,  adjust=False).mean()
-    ema200 = close.ewm(span=200, adjust=False).mean()
+    for i in range(2, len(df) - 3):
+        candle    = df.iloc[i]
+        next1     = df.iloc[i+1]
+        next2     = df.iloc[i+2]
+        next3     = df.iloc[i+3]
 
-    delta = close.diff()
-    gain  = delta.clip(lower=0).rolling(14).mean()
-    loss  = (-delta.clip(upper=0)).rolling(14).mean()
-    rsi   = 100 - (100 / (1 + gain / loss.replace(0, np.nan)))
+        # Bullish OB: شمعة حمراء يعقبها 3 شمعات خضراء قوية
+        if (candle["close"] < candle["open"] and
+            next1["close"] > next1["open"] and
+            next2["close"] > next2["open"] and
+            next3["high"] > candle["high"]):
+            bullish_obs.append({
+                "top":    round(float(candle["open"]), 5),
+                "bottom": round(float(candle["low"]),  5),
+                "index":  i,
+            })
 
-    ema12       = close.ewm(span=12, adjust=False).mean()
-    ema26       = close.ewm(span=26, adjust=False).mean()
-    macd_line   = ema12 - ema26
-    signal_line = macd_line.ewm(span=9, adjust=False).mean()
-    histogram   = macd_line - signal_line
+        # Bearish OB: شمعة خضراء يعقبها 3 شمعات حمراء قوية
+        if (candle["close"] > candle["open"] and
+            next1["close"] < next1["open"] and
+            next2["close"] < next2["open"] and
+            next3["low"] < candle["low"]):
+            bearish_obs.append({
+                "top":    round(float(candle["high"]), 5),
+                "bottom": round(float(candle["close"]),5),
+                "index":  i,
+            })
 
-    bb_mid   = close.rolling(20).mean()
-    bb_std   = close.rolling(20).std()
-    bb_upper = bb_mid + 2 * bb_std
-    bb_lower = bb_mid - 2 * bb_std
+    current = float(df["close"].iloc[-1])
 
-    tr  = pd.concat([(high-low), (high-close.shift()).abs(), (low-close.shift()).abs()], axis=1).max(axis=1)
-    atr = tr.rolling(14).mean()
+    # أقرب OB للسعر الحالي
+    nearest_bullish = sorted(
+        [ob for ob in bullish_obs if ob["top"] < current],
+        key=lambda x: current - x["top"]
+    )[:2]
 
-    low14   = low.rolling(14).min()
-    high14  = high.rolling(14).max()
-    stoch_k = 100 * (close - low14) / (high14 - low14 + 1e-10)
-    stoch_d = stoch_k.rolling(3).mean()
+    nearest_bearish = sorted(
+        [ob for ob in bearish_obs if ob["bottom"] > current],
+        key=lambda x: x["bottom"] - current
+    )[:2]
 
-    recent      = df.tail(100)
-    pivots_high = []
-    pivots_low  = []
+    return {"bullish": nearest_bullish, "bearish": nearest_bearish}
+
+
+def detect_fvg(df: pd.DataFrame) -> dict:
+    """
+    Fair Value Gap: فجوة بين شمعتين لم يتم ملؤها
+    Bullish FVG: low[i+2] > high[i]
+    Bearish FVG: high[i+2] < low[i]
+    """
+    bullish_fvgs = []
+    bearish_fvgs = []
+    current = float(df["close"].iloc[-1])
+
+    for i in range(len(df) - 3, max(len(df) - 50, 0), -1):
+        c1 = df.iloc[i]
+        c3 = df.iloc[i+2]
+
+        # Bullish FVG
+        if float(c3["low"]) > float(c1["high"]):
+            fvg_top    = round(float(c3["low"]),  5)
+            fvg_bottom = round(float(c1["high"]), 5)
+            fvg_mid    = round((fvg_top + fvg_bottom) / 2, 5)
+            if fvg_bottom < current:
+                bullish_fvgs.append({"top": fvg_top, "bottom": fvg_bottom, "mid": fvg_mid})
+
+        # Bearish FVG
+        if float(c3["high"]) < float(c1["low"]):
+            fvg_top    = round(float(c1["low"]),   5)
+            fvg_bottom = round(float(c3["high"]),  5)
+            fvg_mid    = round((fvg_top + fvg_bottom) / 2, 5)
+            if fvg_top > current:
+                bearish_fvgs.append({"top": fvg_top, "bottom": fvg_bottom, "mid": fvg_mid})
+
+    return {
+        "bullish": bullish_fvgs[:2],
+        "bearish": bearish_fvgs[:2],
+    }
+
+
+def detect_liquidity(df: pd.DataFrame) -> dict:
+    """
+    مناطق السيولة: Equal Highs / Equal Lows
+    هذه المناطق تجذب السعر لأنها تجمع وقوف الخسارة
+    """
+    recent  = df.tail(50)
+    highs   = recent["high"].values
+    lows    = recent["low"].values
+    current = float(df["close"].iloc[-1])
+
+    tolerance = current * 0.0005  # 0.05% tolerance
+
+    eq_highs = []
+    eq_lows  = []
+
+    for i in range(len(highs)):
+        for j in range(i+3, len(highs)):
+            if abs(highs[i] - highs[j]) <= tolerance:
+                eq_highs.append(round(float((highs[i] + highs[j]) / 2), 5))
+
+    for i in range(len(lows)):
+        for j in range(i+3, len(lows)):
+            if abs(lows[i] - lows[j]) <= tolerance:
+                eq_lows.append(round(float((lows[i] + lows[j]) / 2), 5))
+
+    # فلترة وإزالة التكرار
+    eq_highs = list(set([round(h, 3) for h in eq_highs if h > current]))[:3]
+    eq_lows  = list(set([round(l, 3) for l in eq_lows  if l < current]))[:3]
+
+    return {
+        "equal_highs": sorted(eq_highs),
+        "equal_lows":  sorted(eq_lows, reverse=True),
+    }
+
+
+def detect_bos_choch(df: pd.DataFrame) -> dict:
+    """
+    Break of Structure (BOS): استمرار الاتجاه
+    Change of Character (CHoCH): انعكاس الاتجاه
+    """
+    recent = df.tail(30)
+    swing_highs = []
+    swing_lows  = []
+
     for i in range(2, len(recent) - 2):
         h = recent["high"].iloc
         l = recent["low"].iloc
         if h[i] > h[i-1] and h[i] > h[i-2] and h[i] > h[i+1] and h[i] > h[i+2]:
-            pivots_high.append(float(h[i]))
+            swing_highs.append((i, float(h[i])))
         if l[i] < l[i-1] and l[i] < l[i-2] and l[i] < l[i+1] and l[i] < l[i+2]:
-            pivots_low.append(float(l[i]))
+            swing_lows.append((i, float(l[i])))
 
-    current     = float(close.iloc[-1])
-    resistances = sorted([p for p in pivots_high if p > current])[:3]
-    supports    = sorted([p for p in pivots_low  if p < current], reverse=True)[:3]
+    structure = "neutral"
+    last_bos  = None
 
-    swing_high = float(high.rolling(50).max().iloc[-1])
-    swing_low  = float(low.rolling(50).min().iloc[-1])
-    fib_range  = swing_high - swing_low
+    if len(swing_highs) >= 2 and len(swing_lows) >= 2:
+        # Bullish: Higher Highs + Higher Lows
+        if (swing_highs[-1][1] > swing_highs[-2][1] and
+                swing_lows[-1][1] > swing_lows[-2][1]):
+            structure = "bullish"
+            last_bos  = round(swing_highs[-1][1], 5)
 
-    def last(s):
-        v = s.iloc[-1]
-        return round(float(v), 5) if not np.isnan(v) else None
+        # Bearish: Lower Highs + Lower Lows
+        elif (swing_highs[-1][1] < swing_highs[-2][1] and
+              swing_lows[-1][1] < swing_lows[-2][1]):
+            structure = "bearish"
+            last_bos  = round(swing_lows[-1][1], 5)
+
+        # CHoCH: آخر High أعلى لكن آخر Low كسر للأسفل
+        elif (swing_highs[-1][1] > swing_highs[-2][1] and
+              swing_lows[-1][1] < swing_lows[-2][1]):
+            structure = "choch_bearish"
+            last_bos  = round(swing_lows[-1][1], 5)
+
+        elif (swing_highs[-1][1] < swing_highs[-2][1] and
+              swing_lows[-1][1] > swing_lows[-2][1]):
+            structure = "choch_bullish"
+            last_bos  = round(swing_highs[-1][1], 5)
+
+    return {"structure": structure, "last_level": last_bos}
+
+
+def detect_premium_discount(df: pd.DataFrame) -> dict:
+    """
+    Premium Zone: فوق 50% من الـ range — منطقة البيع
+    Discount Zone: تحت 50% من الـ range — منطقة الشراء
+    """
+    swing_high = float(df["high"].tail(50).max())
+    swing_low  = float(df["low"].tail(50).min())
+    current    = float(df["close"].iloc[-1])
+    mid        = (swing_high + swing_low) / 2
+
+    zone = "premium" if current > mid else "discount"
+    pct  = round((current - swing_low) / (swing_high - swing_low) * 100, 1)
 
     return {
-        "current_price":    round(current, 5),
-        "candles_count":    len(df),
-        "price_change_pct": round((close.iloc[-1] - close.iloc[-20]) / close.iloc[-20] * 100, 2),
-        "ema8": last(ema8), "ema21": last(ema21), "ema50": last(ema50), "ema200": last(ema200),
-        "ema_trend": "bullish" if last(ema8) > last(ema21) > last(ema50) else "bearish" if last(ema8) < last(ema21) < last(ema50) else "mixed",
-        "rsi": last(rsi), "rsi_prev": round(float(rsi.iloc[-2]), 2),
-        "macd": last(macd_line), "macd_signal": last(signal_line), "macd_hist": last(histogram),
-        "macd_cross": "bullish" if last(macd_line) > last(signal_line) else "bearish",
-        "bb_upper": last(bb_upper), "bb_mid": last(bb_mid), "bb_lower": last(bb_lower),
-        "bb_width": round((bb_upper.iloc[-1] - bb_lower.iloc[-1]) / bb_mid.iloc[-1] * 100, 2),
-        "atr": last(atr), "atr_pct": round(float(atr.iloc[-1]) / current * 100, 3),
-        "stoch_k": last(stoch_k), "stoch_d": last(stoch_d),
-        "resistances": [round(r, 5) for r in resistances],
-        "supports":    [round(s, 5) for s in supports],
-        "fibonacci": {
-            "0.0":   round(swing_low, 5),
-            "0.236": round(swing_low + 0.236 * fib_range, 5),
-            "0.382": round(swing_low + 0.382 * fib_range, 5),
-            "0.5":   round(swing_low + 0.5   * fib_range, 5),
-            "0.618": round(swing_low + 0.618 * fib_range, 5),
-            "1.0":   round(swing_high, 5),
-        },
-        "swing_high": round(swing_high, 5),
-        "swing_low":  round(swing_low,  5),
+        "zone":        zone,
+        "percentage":  pct,
+        "mid":         round(mid, 5),
+        "swing_high":  round(swing_high, 5),
+        "swing_low":   round(swing_low,  5),
+    }
+
+
+def compute_indicators(df: pd.DataFrame) -> dict:
+    """يحسب جميع مؤشرات SMC."""
+    current = round(float(df["close"].iloc[-1]), 5)
+
+    # اتجاه EMA البسيط للتأكيد
+    close  = df["close"]
+    ema50  = close.ewm(span=50,  adjust=False).mean()
+    ema200 = close.ewm(span=200, adjust=False).mean()
+    ema_bias = "bullish" if float(ema50.iloc[-1]) > float(ema200.iloc[-1]) else "bearish"
+
+    # RSI للتأكيد فقط
+    delta = close.diff()
+    gain  = delta.clip(lower=0).rolling(14).mean()
+    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+    rsi   = 100 - (100 / (1 + gain / loss.replace(0, np.nan)))
+    rsi_val = round(float(rsi.iloc[-1]), 1)
+
+    # ATR للمسافات
+    high = df["high"]
+    low  = df["low"]
+    tr   = pd.concat([(high-low), (high-close.shift()).abs(), (low-close.shift()).abs()], axis=1).max(axis=1)
+    atr  = round(float(tr.rolling(14).mean().iloc[-1]), 5)
+
+    return {
+        "current_price":   current,
+        "ema_bias":        ema_bias,
+        "rsi":             rsi_val,
+        "atr":             atr,
+        "order_blocks":    detect_order_blocks(df),
+        "fvg":             detect_fvg(df),
+        "liquidity":       detect_liquidity(df),
+        "structure":       detect_bos_choch(df),
+        "premium_discount": detect_premium_discount(df),
         "last_5_candles": [
-            {"open": round(float(df["open"].iloc[i]), 5), "high": round(float(df["high"].iloc[i]), 5),
-             "low":  round(float(df["low"].iloc[i]),  5), "close": round(float(df["close"].iloc[i]), 5)}
+            {
+                "open":  round(float(df["open"].iloc[i]),  5),
+                "high":  round(float(df["high"].iloc[i]),  5),
+                "low":   round(float(df["low"].iloc[i]),   5),
+                "close": round(float(df["close"].iloc[i]), 5),
+            }
             for i in range(-5, 0)
         ],
     }
