@@ -1,6 +1,6 @@
 python-telegram-bot==21.6
 aiohttp==3.10.5
-yfinance==0.2.50
 pandas==2.2.3
 numpy==2.1.0
 python-dotenv==1.0.1
+
