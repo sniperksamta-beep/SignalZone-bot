@@ -1,15 +1,9 @@
-"""
-services/ai_engine.py — Flareposts AI engine using Gemini REST API directly.
-No library version issues — pure HTTP calls.
-"""
-
 import re
 import aiohttp
 from bs4 import BeautifulSoup
 from config import GROQ_KEY
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-
 
 async def extract_from_url(url: str) -> str:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; FlarepostsBot/1.0)"}
@@ -95,23 +89,28 @@ async def generate_content(raw_input: str) -> dict:
     if len(content.strip()) < 30:
         raise ValueError("Content is too short. Please provide more text.")
 
+    headers = {
+        "Authorization": f"Bearer {GROQ_KEY}",
+        "Content-Type": "application/json"
+    }
     payload = {
-        "contents": [{"parts": [{"text": PROMPT_TEMPLATE.format(content=content[:5000])}]}],
-        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 3000}
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": PROMPT_TEMPLATE.format(content=content[:5000])}],
+        "max_tokens": 3000,
+        "temperature": 0.8
     }
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            GEMINI_URL, json=payload,
-            headers={"Content-Type": "application/json"},
+            GROQ_URL, json=payload, headers=headers,
             timeout=aiohttp.ClientTimeout(total=60)
         ) as resp:
             if resp.status != 200:
                 error_text = await resp.text()
-                raise ValueError(f"Gemini API error {resp.status}: {error_text[:300]}")
+                raise ValueError(f"Groq API error {resp.status}: {error_text[:300]}")
             data = await resp.json()
 
-    raw_output = data["candidates"][0]["content"]["parts"][0]["text"]
+    raw_output = data["choices"][0]["message"]["content"]
 
     sections = {}
     platforms = ["TWITTER", "LINKEDIN", "INSTAGRAM", "YOUTUBE", "EMAIL", "TIKTOK"]
