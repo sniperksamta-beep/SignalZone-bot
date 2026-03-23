@@ -1,302 +1,312 @@
 """
-handlers/core.py — واجهة البوت الكاملة بالعربية مع تنقل سهل
+handlers/core.py — التدفق الكامل: اختيار اللغة → الزوج → الفريم → التوصية
 """
 
+import asyncio
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 import database as db
-from config import BOT_NAME, FREE_USES_PER_MONTH
+from config import PAIRS, TIMEFRAMES, FREE_SIGNALS, BOT_NAME
 
-PLATFORM_EMOJIS = {
-    "TWITTER":   "🐦",
-    "LINKEDIN":  "💼",
-    "INSTAGRAM": "📸",
-    "YOUTUBE":   "▶️",
-    "EMAIL":     "📧",
-    "TIKTOK":    "🎵",
-}
-
-PLATFORM_NAMES = {
-    "TWITTER":   "خيط تويتر / X",
-    "LINKEDIN":  "منشور لينكدإن",
-    "INSTAGRAM": "تعليق إنستغرام",
-    "YOUTUBE":   "وصف يوتيوب",
-    "EMAIL":     "نشرة بريدية",
-    "TIKTOK":    "سكريبت تيك توك",
-}
-
-# ── زر الرئيسية الثابت ─────────────────────────────────────────
-HOME_ROW = [InlineKeyboardButton("🏠 الرئيسية", callback_data="go_home")]
+# ── مساعدات ──────────────────────────────────────────────────────
+def t(user_id, ar_text, en_text):
+    """اختيار النص حسب لغة المستخدم."""
+    lang = db.get_lang(user_id)
+    return ar_text if lang == "ar" else en_text
 
 
-def home_keyboard(extra_rows: list = None) -> InlineKeyboardMarkup:
-    """أي كيبورد + زر الرئيسية دائمًا في الأسفل."""
+def home_keyboard(user_id, extra_rows=None):
     rows = extra_rows or []
-    rows.append(HOME_ROW)
+    rows.append([
+        InlineKeyboardButton(
+            t(user_id, "🏠 الرئيسية", "🏠 Home"),
+            callback_data="go_home"
+        )
+    ])
     return InlineKeyboardMarkup(rows)
 
 
-async def _send_home(target, edit: bool = False):
-    """إرسال أو تعديل رسالة الرئيسية."""
-    text = (
-        f"🔥 *Flareposts*\n\n"
-        f"أرسل لي أي شيء وسأحوّله إلى 6 منشورات جاهزة:\n\n"
-        f"🔗 رابط مقال\n"
-        f"▶️ رابط يوتيوب\n"
-        f"📝 نص أو أفكار\n\n"
-        f"*المنصات:*\n"
-        f"🐦 تويتر/X  |  💼 لينكدإن  |  📸 إنستغرام\n"
-        f"▶️ يوتيوب  |  📧 بريد  |  🎵 تيك توك"
-    )
-    keyboard = home_keyboard([
+# ── /start ────────────────────────────────────────────────────────
+async def start_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    db.ensure_user(user.id, user.username or "", user.full_name or "")
+
+    keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("💎 ترقية برو", callback_data="show_plans"),
-            InlineKeyboardButton("📊 إحصائياتي", callback_data="my_stats"),
-        ],
-        [InlineKeyboardButton("📖 كيف يعمل؟", callback_data="how_it_works")],
+            InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar"),
+            InlineKeyboardButton("🇺🇸 English",  callback_data="lang_en"),
+        ]
     ])
+    await update.message.reply_text(
+        "🌐 *Choose your language / اختر لغتك:*",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+
+# ── الرئيسية ──────────────────────────────────────────────────────
+async def send_home(target, user_id, edit=False):
+    pro  = db.is_pro(user_id)
+    used = db.free_signals_used(user_id)
+    rem  = max(0, FREE_SIGNALS - used)
+
+    if t(user_id, "ar", "en") == "ar":
+        plan_badge = "⭐ برو — غير محدود" if pro else f"🆓 مجاني — {rem}/{FREE_SIGNALS} متبقية"
+        text = (
+            f"📡 *{BOT_NAME}*\n\n"
+            f"توصيات تداول دقيقة مدعومة بالذكاء الاصطناعي\n"
+            f"وبيانات السوق الحقيقية.\n\n"
+            f"*الأزواج المتاحة:*\n"
+            + "\n".join([f"{v['emoji']} {v['name_ar']}" for v in PAIRS.values()])
+            + f"\n\n━━━━━━━━━━━━━━━━\n"
+            f"خطتك: *{plan_badge}*\n\n"
+            f"👇 اضغط *توصية جديدة* للبدء"
+        )
+        buttons = [
+            [InlineKeyboardButton("📡 توصية جديدة", callback_data="new_signal")],
+            [
+                InlineKeyboardButton("💎 اشتراك برو",  callback_data="show_plans"),
+                InlineKeyboardButton("📊 إحصائياتي",   callback_data="my_stats"),
+            ],
+            [InlineKeyboardButton("🌐 English", callback_data="lang_en")],
+        ]
+    else:
+        plan_badge = "⭐ Pro — Unlimited" if pro else f"🆓 Free — {rem}/{FREE_SIGNALS} left"
+        text = (
+            f"📡 *{BOT_NAME}*\n\n"
+            f"AI-powered trading signals based on\n"
+            f"real market data & technical analysis.\n\n"
+            f"*Available Pairs:*\n"
+            + "\n".join([f"{v['emoji']} {v['name_en']}" for v in PAIRS.values()])
+            + f"\n\n━━━━━━━━━━━━━━━━\n"
+            f"Your plan: *{plan_badge}*\n\n"
+            f"👇 Tap *New Signal* to start"
+        )
+        buttons = [
+            [InlineKeyboardButton("📡 New Signal", callback_data="new_signal")],
+            [
+                InlineKeyboardButton("💎 Go Pro",    callback_data="show_plans"),
+                InlineKeyboardButton("📊 My Stats",  callback_data="my_stats"),
+            ],
+            [InlineKeyboardButton("🌐 العربية", callback_data="lang_ar")],
+        ]
+
+    keyboard = InlineKeyboardMarkup(buttons)
     if edit:
         await target.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
     else:
         await target.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
 
-async def start_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    db.ensure_user(user.id, user.username or "", user.full_name or "")
-    await _send_home(update.message)
-
-
-async def help_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    text = (
-        f"📖 *دليل الاستخدام*\n\n"
-        f"أرسل رابطًا أو نصًا وسيولّد البوت 6 منشورات.\n\n"
-        f"*الأوامر:*\n"
-        f"`/start` — الرئيسية\n"
-        f"`/upgrade` — الترقية إلى برو\n"
-        f"`/status` — خطتك واستخداماتك\n\n"
-        f"*الخطط:*\n"
-        f"🆓 مجاني — {FREE_USES_PER_MONTH} توليدات/شهر\n"
-        f"⭐ برو — غير محدود مقابل 8 USDT/شهر\n"
-        f"💰 3 أشهر — 20 USDT (وفّر 4$)"
-    )
-    await update.message.reply_text(
-        text, parse_mode="Markdown",
-        reply_markup=home_keyboard([
-            [InlineKeyboardButton("💎 الترقية إلى برو", callback_data="show_plans")]
-        ])
-    )
-
-
-async def status_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    db.ensure_user(user.id, user.username or "", user.full_name or "")
-    row = db.get_user(user.id)
-    pro = db.is_pro(user.id)
-    used_month = db.uses_this_month(user.id)
-    total = row["total_uses"] if row else 0
-
-    if pro and row:
-        import datetime
-        expires_str = datetime.datetime.fromtimestamp(row["plan_expires"]).strftime("%d %b %Y")
-        plan_text = f"⭐ *برو* — ينتهي {expires_str}"
-    else:
-        remaining = max(0, FREE_USES_PER_MONTH - used_month)
-        plan_text = f"🆓 *مجاني* — {remaining}/{FREE_USES_PER_MONTH} متبقية"
-
-    text = (
-        f"📊 *إحصائياتك*\n\n"
-        f"الخطة: {plan_text}\n"
-        f"هذا الشهر: `{used_month}` توليدات\n"
-        f"الإجمالي: `{total}` توليدات"
-    )
-    extra = [] if pro else [[InlineKeyboardButton("💎 الترقية إلى برو", callback_data="show_plans")]]
-    await update.message.reply_text(
-        text, parse_mode="Markdown",
-        reply_markup=home_keyboard(extra)
-    )
-
-
-async def generate_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    text = update.message.text.strip()
-    if text.startswith("/"):
-        return
-
-    db.ensure_user(user.id, user.username or "", user.full_name or "")
-    pro  = db.is_pro(user.id)
-    used = db.uses_this_month(user.id)
-
-    if not pro and used >= FREE_USES_PER_MONTH:
-        await update.message.reply_text(
-            f"⚠️ *استنفدت {FREE_USES_PER_MONTH} توليدات المجانية هذا الشهر.*\n\n"
-            f"قم بالترقية إلى برو للحصول على استخدام غير محدود.",
-            parse_mode="Markdown",
-            reply_markup=home_keyboard([
-                [InlineKeyboardButton("💎 ترقية إلى برو", callback_data="show_plans")]
-            ])
-        )
-        return
-
-    msg = await update.message.reply_text(
-        "⚡ *جارٍ توليد المحتوى...*\n\n"
-        "🔍 قراءة المصدر...\n"
-        "🤖 توليد 6 منشورات...\n"
-        "_يستغرق هذا 10-20 ثانية_",
-        parse_mode="Markdown"
-    )
-
-    try:
-        from services.ai_engine import generate_content
-        result = await generate_content(text)
-        db.log_generation(user.id, text[:200])
-
-        ctx.user_data["last_result"] = result["platforms"]
-
-        source_labels = {"url": "🔗 مقال", "youtube": "▶️ فيديو", "text": "📝 نص"}
-        source_label  = source_labels.get(result["source_type"], "محتوى")
-
-        # بناء أزرار المنصات
-        platform_buttons = []
-        platforms = list(result["platforms"].keys())
-        for i in range(0, len(platforms), 2):
-            row = []
-            for p in platforms[i:i+2]:
-                row.append(InlineKeyboardButton(
-                    f"{PLATFORM_EMOJIS.get(p,'')} {PLATFORM_NAMES.get(p,p)}",
-                    callback_data=f"show_platform_{p}"
-                ))
-            platform_buttons.append(row)
-
-        platform_buttons.append([
-            InlineKeyboardButton("📦 جميع المنشورات الـ 6", callback_data="show_all")
-        ])
-
-        used_now = db.uses_this_month(user.id)
-        footer = f"\n_{'⭐ برو — غير محدود' if pro else f'استخدمت {used_now}/{FREE_USES_PER_MONTH} هذا الشهر'}_"
-
-        await msg.edit_text(
-            f"✅ *تم التوليد من {source_label}!*\n\n"
-            f"اختر المنصة 👇{footer}",
-            parse_mode="Markdown",
-            reply_markup=home_keyboard(platform_buttons)
-        )
-
-    except ValueError as e:
-        await msg.edit_text(
-            f"⚠️ {e}\n\nجرّب رابطًا آخر أو الصق النص مباشرة.",
-            reply_markup=home_keyboard()
-        )
-    except Exception:
-        await msg.edit_text(
-            "❌ حدث خطأ. الرجاء المحاولة مرة أخرى.",
-            reply_markup=home_keyboard()
-        )
-        raise
-
-
-async def platform_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+# ── الكول باكات ───────────────────────────────────────────────────
+async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data
+    data    = query.data
+    user_id = query.from_user.id
+
+    # ── اختيار اللغة ─────────────────────────────────────────────
+    if data in ("lang_ar", "lang_en"):
+        lang = data.split("_")[1]
+        db.ensure_user(user_id, query.from_user.username or "", query.from_user.full_name or "", lang)
+        db.set_lang(user_id, lang)
+        await send_home(query, user_id, edit=True)
+        return
 
     # ── الرئيسية ─────────────────────────────────────────────────
     if data == "go_home":
-        await _send_home(query, edit=True)
-        return
-
-    # ── كيف يعمل ─────────────────────────────────────────────────
-    if data == "how_it_works":
-        await query.edit_message_text(
-            "🔧 *كيف يعمل Flareposts:*\n\n"
-            "1️⃣ أرسل رابطًا أو نص يوتيوب أو نصًا\n"
-            "2️⃣ يقرأ الذكاء الاصطناعي المحتوى ويفهمه\n"
-            "3️⃣ يعيد كتابته بأسلوب كل منصة\n"
-            "4️⃣ تختار المنشورات وتنسخها\n\n"
-            "• تويتر: خيوط موجزة وجذّابة\n"
-            "• لينكدإن: سرد احترافي\n"
-            "• إنستغرام: أسلوب غير رسمي + هاشتاقات\n"
-            "• يوتيوب: وصف محسّن لـ SEO\n"
-            "• البريد: نشرة مع دعوة للعمل\n"
-            "• تيك توك: سكريبت منطوق مع توقيت",
-            parse_mode="Markdown",
-            reply_markup=home_keyboard()
-        )
+        await send_home(query, user_id, edit=True)
         return
 
     # ── إحصائيات ─────────────────────────────────────────────────
     if data == "my_stats":
-        user  = query.from_user
-        row   = db.get_user(user.id)
-        pro   = db.is_pro(user.id)
-        used  = db.uses_this_month(user.id)
-        total = row["total_uses"] if row else 0
-        remaining = "∞" if pro else max(0, FREE_USES_PER_MONTH - used)
+        row  = db.get_user(user_id)
+        pro  = db.is_pro(user_id)
+        used = db.free_signals_used(user_id)
+        total = row["total_signals"] if row else 0
 
-        await query.edit_message_text(
-            f"📊 *إحصائياتك*\n\n"
-            f"الخطة: *{'⭐ برو' if pro else '🆓 مجاني'}*\n"
-            f"هذا الشهر: `{used}` توليدات\n"
-            f"المتبقي: `{remaining}`\n"
-            f"الإجمالي: `{total}` توليدات",
-            parse_mode="Markdown",
-            reply_markup=home_keyboard(
-                [] if pro else [[InlineKeyboardButton("💎 ترقية إلى برو", callback_data="show_plans")]]
+        if t(user_id, "ar", "en") == "ar":
+            text = (
+                f"📊 *إحصائياتك*\n\n"
+                f"الخطة: *{'⭐ برو' if pro else '🆓 مجاني'}*\n"
+                f"توصيات مجانية استُخدمت: `{used}/{FREE_SIGNALS}`\n"
+                f"إجمالي التوصيات: `{total}`"
             )
-        )
+        else:
+            text = (
+                f"📊 *Your Stats*\n\n"
+                f"Plan: *{'⭐ Pro' if pro else '🆓 Free'}*\n"
+                f"Free signals used: `{used}/{FREE_SIGNALS}`\n"
+                f"Total signals: `{total}`"
+            )
+
+        extra = [] if pro else [[InlineKeyboardButton(
+            t(user_id, "💎 ترقية إلى برو", "💎 Upgrade to Pro"),
+            callback_data="show_plans"
+        )]]
+        await query.edit_message_text(text, parse_mode="Markdown",
+                                       reply_markup=home_keyboard(user_id, extra))
         return
 
-    # ── عرض منصة معينة ───────────────────────────────────────────
-    platforms = ctx.user_data.get("last_result", {})
-
-    if data == "show_all":
-        await query.edit_message_text(
-            "📦 *إرسال جميع المنشورات...*",
-            parse_mode="Markdown",
-            reply_markup=home_keyboard()
-        )
-        for platform, content in platforms.items():
-            emoji = PLATFORM_EMOJIS.get(platform, "📄")
-            name  = PLATFORM_NAMES.get(platform, platform)
-            full_text = f"{emoji} *{name}*\n{'─'*30}\n{content}"
-            for chunk in [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]:
-                await query.message.reply_text(chunk, parse_mode="Markdown")
-
-        # زر الرجوع بعد إرسال الكل
-        await query.message.reply_text(
-            "✅ *تم إرسال جميع المنشورات!*",
-            parse_mode="Markdown",
-            reply_markup=home_keyboard()
-        )
-        return
-
-    if data.startswith("show_platform_"):
-        if not platforms:
+    # ── توصية جديدة — اختيار الزوج ──────────────────────────────
+    if data == "new_signal":
+        if not db.can_use(user_id):
+            if t(user_id, "ar", "en") == "ar":
+                text = (
+                    f"⚠️ *استنفدت توصياتك المجانية الـ {FREE_SIGNALS}.*\n\n"
+                    f"اشترك في برو للحصول على توصيات غير محدودة."
+                )
+            else:
+                text = (
+                    f"⚠️ *You've used all {FREE_SIGNALS} free signals.*\n\n"
+                    f"Subscribe to Pro for unlimited signals."
+                )
             await query.edit_message_text(
-                "⚠️ انتهت الجلسة. أرسل المحتوى مجددًا.",
-                reply_markup=home_keyboard()
+                text, parse_mode="Markdown",
+                reply_markup=home_keyboard(user_id, [[
+                    InlineKeyboardButton(
+                        t(user_id, "💎 اشتراك برو — 35$", "💎 Go Pro — $35/mo"),
+                        callback_data="show_plans"
+                    )
+                ]])
             )
             return
 
-        platform  = data.replace("show_platform_", "")
-        content   = platforms.get(platform, "غير متاح.")
-        emoji     = PLATFORM_EMOJIS.get(platform, "📄")
-        name      = PLATFORM_NAMES.get(platform, platform)
-        full_text = f"{emoji} *{name}*\n{'─'*30}\n{content}"
+        # عرض الأزواج
+        buttons = []
+        for pair_key, pair_info in PAIRS.items():
+            name = pair_info["name_ar"] if t(user_id, "ar", "en") == "ar" else pair_info["name_en"]
+            buttons.append([InlineKeyboardButton(
+                f"{pair_info['emoji']} {name}",
+                callback_data=f"pair_{pair_key}"
+            )])
 
-        # أزرار التنقل بين المنصات
-        nav_buttons = [
-            InlineKeyboardButton(PLATFORM_EMOJIS.get(p, "📄"), callback_data=f"show_platform_{p}")
-            for p in platforms.keys()
-        ]
+        label = "اختر الزوج:" if t(user_id, "ar", "en") == "ar" else "Choose a pair:"
+        await query.edit_message_text(
+            f"📊 *{label}*",
+            parse_mode="Markdown",
+            reply_markup=home_keyboard(user_id, buttons)
+        )
+        return
 
-        keyboard = home_keyboard([
-            nav_buttons,
-            [InlineKeyboardButton("📦 جميع المنشورات", callback_data="show_all")]
-        ])
+    # ── اختيار الزوج → عرض الفريمات ─────────────────────────────
+    if data.startswith("pair_"):
+        pair = data.replace("pair_", "")
+        ctx.user_data["selected_pair"] = pair
+        pair_info = PAIRS[pair]
 
-        for i, chunk in enumerate([full_text[j:j+4000] for j in range(0, len(full_text), 4000)]):
-            if i == 0:
-                await query.edit_message_text(chunk, parse_mode="Markdown", reply_markup=keyboard)
+        buttons = []
+        for tf_key, tf_info in TIMEFRAMES.items():
+            label = tf_info["label_ar"] if t(user_id, "ar", "en") == "ar" else tf_info["label_en"]
+            buttons.append([InlineKeyboardButton(
+                f"⏱ {label}", callback_data=f"tf_{tf_key}"
+            )])
+
+        pair_name = pair_info["name_ar"] if t(user_id, "ar", "en") == "ar" else pair_info["name_en"]
+        label = "اختر الإطار الزمني:" if t(user_id, "ar", "en") == "ar" else "Choose timeframe:"
+
+        await query.edit_message_text(
+            f"{pair_info['emoji']} *{pair_name}*\n\n*{label}*",
+            parse_mode="Markdown",
+            reply_markup=home_keyboard(user_id, buttons)
+        )
+        return
+
+    # ── اختيار الفريم → توليد التوصية ────────────────────────────
+    if data.startswith("tf_"):
+        timeframe = data.replace("tf_", "")
+        pair      = ctx.user_data.get("selected_pair")
+
+        if not pair:
+            await send_home(query, user_id, edit=True)
+            return
+
+        pair_info = PAIRS[pair]
+        tf_info   = TIMEFRAMES[timeframe]
+        lang      = db.get_lang(user_id)
+        pair_name = pair_info["name_ar"] if lang == "ar" else pair_info["name_en"]
+        tf_name   = tf_info["label_ar"]  if lang == "ar" else tf_info["label_en"]
+
+        # رسالة انتظار
+        if lang == "ar":
+            wait_text = (
+                f"⏳ *جارٍ تحليل {pair_name} على {tf_name}...*\n\n"
+                f"🔍 جلب بيانات السوق الحقيقية...\n"
+                f"📊 حساب المؤشرات التقنية...\n"
+                f"🤖 تحليل الذكاء الاصطناعي...\n\n"
+                f"_قد يستغرق هذا دقيقة — التحليل الدقيق يأخذ وقته_"
+            )
+        else:
+            wait_text = (
+                f"⏳ *Analyzing {pair} on {tf_name}...*\n\n"
+                f"🔍 Fetching real market data...\n"
+                f"📊 Computing technical indicators...\n"
+                f"🤖 AI deep analysis...\n\n"
+                f"_This may take a minute — precision takes time_"
+            )
+
+        await query.edit_message_text(wait_text, parse_mode="Markdown")
+
+        try:
+            from services.market_data import fetch_candles, compute_indicators
+            from services.ai_engine   import analyze_and_signal
+
+            # جلب البيانات وحساب المؤشرات في thread منفصل لعدم تجميد البوت
+            loop = asyncio.get_event_loop()
+            df   = await loop.run_in_executor(None, fetch_candles, pair, timeframe)
+            indicators = await loop.run_in_executor(None, compute_indicators, df)
+
+            # تحليل الذكاء الاصطناعي
+            signal_text = await analyze_and_signal(pair, timeframe, indicators, lang)
+
+            # تسجيل الاستخدام
+            direction = "BUY" if "BUY" in signal_text.upper() else "SELL" if "SELL" in signal_text.upper() else "WAIT"
+            db.log_signal(user_id, pair, timeframe, direction)
+
+            # البناء النهائي
+            pro  = db.is_pro(user_id)
+            used = db.free_signals_used(user_id)
+            rem  = max(0, FREE_SIGNALS - used)
+
+            if lang == "ar":
+                header = f"📡 *توصية {pair_info['emoji']} {pair_name} — {tf_name}*\n{'━'*30}\n\n"
+                footer = f"\n\n{'━'*30}\n_{'⭐ برو — غير محدود' if pro else f'🆓 استخدمت {used}/{FREE_SIGNALS} مجانية'}_"
             else:
+                header = f"📡 *Signal: {pair_info['emoji']} {pair} — {tf_name}*\n{'━'*30}\n\n"
+                footer = f"\n\n{'━'*30}\n_{'⭐ Pro — Unlimited' if pro else f'🆓 Used {used}/{FREE_SIGNALS} free'}_"
+
+            full_text = header + signal_text + footer
+
+            # تقسيم إذا طال النص
+            chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
+
+            extra_buttons = [
+                [InlineKeyboardButton(
+                    t(user_id, "📡 توصية جديدة", "📡 New Signal"),
+                    callback_data="new_signal"
+                )]
+            ]
+            if not pro:
+                extra_buttons.append([InlineKeyboardButton(
+                    t(user_id, "💎 اشتراك برو — توصيات غير محدودة", "💎 Go Pro — Unlimited Signals"),
+                    callback_data="show_plans"
+                )])
+
+            await query.edit_message_text(
+                chunks[0],
+                parse_mode="Markdown",
+                reply_markup=home_keyboard(user_id, extra_buttons)
+            )
+            for chunk in chunks[1:]:
                 await query.message.reply_text(chunk, parse_mode="Markdown")
+
+        except Exception as e:
+            err_text = (
+                f"❌ {'حدث خطأ أثناء التحليل' if lang == 'ar' else 'Analysis failed'}.\n`{str(e)[:100]}`"
+            )
+            await query.edit_message_text(
+                err_text,
+                parse_mode="Markdown",
+                reply_markup=home_keyboard(user_id)
+            )
+            raise
