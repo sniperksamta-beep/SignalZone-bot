@@ -32,8 +32,8 @@ async def send_home(target, user_id, edit=False):
         plan_badge = "⭐ برو — غير محدود" if pro else f"🆓 مجاني — {rem}/{FREE_SIGNALS} متبقية"
         text = (
             f"📡 *{BOT_NAME}*\n\n"
-            f"توصيات تداول دقيقة مدعومة بالذكاء الاصطناعي\n"
-            f"وبيانات السوق الحقيقية.\n\n"
+            f"توصيات تداول بتحليل 3 فريمات متزامنة\n"
+            f"للحصول على أعلى دقة ممكنة.\n\n"
             f"*الأزواج المتاحة:*\n"
             + "\n".join([f"{v['emoji']} {v['name_ar']}" for v in PAIRS.values()])
             + f"\n\n━━━━━━━━━━━━━━━━\n"
@@ -50,8 +50,8 @@ async def send_home(target, user_id, edit=False):
         plan_badge = "⭐ Pro — Unlimited" if pro else f"🆓 Free — {rem}/{FREE_SIGNALS} left"
         text = (
             f"📡 *{BOT_NAME}*\n\n"
-            f"AI-powered trading signals based on\n"
-            f"real market data & technical analysis.\n\n"
+            f"Trading signals using 3-timeframe confluence\n"
+            f"for maximum accuracy.\n\n"
             f"*Available Pairs:*\n"
             + "\n".join([f"{v['emoji']} {v['name_en']}" for v in PAIRS.values()])
             + f"\n\n━━━━━━━━━━━━━━━━\n"
@@ -95,10 +95,10 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         total = row["total_signals"] if row else 0
         if t(user_id, "ar", "en") == "ar":
             text = (f"📊 *إحصائياتك*\n\nالخطة: *{'⭐ برو' if pro else '🆓 مجاني'}*\n"
-                    f"توصيات مجانية استُخدمت: `{used}/{FREE_SIGNALS}`\nإجمالي التوصيات: `{total}`")
+                    f"توصيات مجانية: `{used}/{FREE_SIGNALS}`\nإجمالي: `{total}`")
         else:
             text = (f"📊 *Your Stats*\n\nPlan: *{'⭐ Pro' if pro else '🆓 Free'}*\n"
-                    f"Free signals used: `{used}/{FREE_SIGNALS}`\nTotal signals: `{total}`")
+                    f"Free used: `{used}/{FREE_SIGNALS}`\nTotal: `{total}`")
         extra = [] if pro else [[InlineKeyboardButton(
             t(user_id, "💎 ترقية إلى برو", "💎 Upgrade to Pro"), callback_data="show_plans")]]
         await query.edit_message_text(text, parse_mode="Markdown",
@@ -107,34 +107,44 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "new_signal":
         if not db.can_use(user_id):
-            text = (f"⚠️ *استنفدت توصياتك المجانية الـ {FREE_SIGNALS}.*\n\nاشترك في برو للحصول على توصيات غير محدودة."
-                    if t(user_id, "ar", "en") == "ar" else
+            text = (f"⚠️ *استنفدت {FREE_SIGNALS} توصيات المجانية.*\n\nاشترك في برو للحصول على توصيات غير محدودة."
+                    if t(user_id,"ar","en")=="ar" else
                     f"⚠️ *You've used all {FREE_SIGNALS} free signals.*\n\nSubscribe to Pro for unlimited signals.")
             await query.edit_message_text(text, parse_mode="Markdown",
                 reply_markup=home_keyboard(user_id, [[InlineKeyboardButton(
-                    t(user_id, "💎 اشتراك برو — 35$", "💎 Go Pro — $35/mo"),
-                    callback_data="show_plans")]]))
+                    t(user_id,"💎 اشتراك برو","💎 Go Pro"), callback_data="show_plans")]]))
+            return
+
+        remaining = db.check_cooldown(user_id)
+        if remaining > 0:
+            mins = remaining // 60
+            secs = remaining % 60
+            text = (f"⏳ *انتظر {mins}:{secs:02d} دقيقة*\n\nفترة انتظار بين كل توصية والأخرى لضمان جودة التحليل."
+                    if t(user_id,"ar","en")=="ar" else
+                    f"⏳ *Wait {mins}:{secs:02d} minutes*\n\nCooldown between signals to ensure analysis quality.")
+            await query.edit_message_text(text, parse_mode="Markdown",
+                                           reply_markup=home_keyboard(user_id))
             return
 
         buttons = []
         for pair_key, pair_info in PAIRS.items():
-            name = pair_info["name_ar"] if t(user_id, "ar", "en") == "ar" else pair_info["name_en"]
+            name = pair_info["name_ar"] if t(user_id,"ar","en")=="ar" else pair_info["name_en"]
             buttons.append([InlineKeyboardButton(f"{pair_info['emoji']} {name}", callback_data=f"pair_{pair_key}")])
-        label = "اختر الزوج:" if t(user_id, "ar", "en") == "ar" else "Choose a pair:"
+        label = "اختر الزوج:" if t(user_id,"ar","en")=="ar" else "Choose a pair:"
         await query.edit_message_text(f"📊 *{label}*", parse_mode="Markdown",
                                        reply_markup=home_keyboard(user_id, buttons))
         return
 
     if data.startswith("pair_"):
-        pair = data.replace("pair_", "")
+        pair      = data.replace("pair_", "")
         ctx.user_data["selected_pair"] = pair
         pair_info = PAIRS[pair]
-        buttons = []
+        buttons   = []
         for tf_key, tf_info in TIMEFRAMES.items():
-            label = tf_info["label_ar"] if t(user_id, "ar", "en") == "ar" else tf_info["label_en"]
+            label = tf_info["label_ar"] if t(user_id,"ar","en")=="ar" else tf_info["label_en"]
             buttons.append([InlineKeyboardButton(f"⏱ {label}", callback_data=f"tf_{tf_key}")])
-        pair_name = pair_info["name_ar"] if t(user_id, "ar", "en") == "ar" else pair_info["name_en"]
-        label = "اختر الإطار الزمني:" if t(user_id, "ar", "en") == "ar" else "Choose timeframe:"
+        pair_name = pair_info["name_ar"] if t(user_id,"ar","en")=="ar" else pair_info["name_en"]
+        label     = "اختر الإطار الزمني:" if t(user_id,"ar","en")=="ar" else "Choose timeframe:"
         await query.edit_message_text(f"{pair_info['emoji']} *{pair_name}*\n\n*{label}*",
                                        parse_mode="Markdown", reply_markup=home_keyboard(user_id, buttons))
         return
@@ -147,18 +157,21 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         pair_info = PAIRS[pair]
-        tf_info   = TIMEFRAMES[timeframe]
         lang      = db.get_lang(user_id)
-        pair_name = pair_info["name_ar"] if lang == "ar" else pair_info["name_en"]
-        tf_name   = tf_info["label_ar"]  if lang == "ar" else tf_info["label_en"]
+        pair_name = pair_info["name_ar"] if lang=="ar" else pair_info["name_en"]
+        tf_name   = TIMEFRAMES[timeframe]["label_ar"] if lang=="ar" else TIMEFRAMES[timeframe]["label_en"]
 
         wait_text = (
             f"⏳ *جارٍ تحليل {pair_name} على {tf_name}...*\n\n"
-            f"🔍 جلب بيانات السوق...\n📊 قراءة الحمض النووي للشمعات...\n🤖 تحليل الذكاء الاصطناعي...\n\n"
+            f"🔍 جلب 3 فريمات متزامنة...\n"
+            f"📊 حساب التوافق...\n"
+            f"🤖 الذكاء الاصطناعي يحلل...\n\n"
             f"_قد يستغرق هذا دقيقة_"
-            if lang == "ar" else
+            if lang=="ar" else
             f"⏳ *Analyzing {pair} on {tf_name}...*\n\n"
-            f"🔍 Fetching market data...\n📊 Reading Candle DNA...\n🤖 AI analysis...\n\n"
+            f"🔍 Fetching 3 timeframes...\n"
+            f"📊 Computing confluence...\n"
+            f"🤖 AI analyzing...\n\n"
             f"_This may take a minute_"
         )
         await query.edit_message_text(wait_text, parse_mode="Markdown")
@@ -167,11 +180,10 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             from services.market_data import fetch_candles, compute_indicators
             from services.ai_engine   import analyze_and_signal
 
-            df         = await fetch_candles(pair, timeframe)
-            indicators = compute_indicators(df)
+            frames     = await fetch_candles(pair, timeframe)
+            indicators = compute_indicators(frames)
             signal_text, is_wait = await analyze_and_signal(pair, timeframe, indicators, lang)
 
-            # تسجيل الاستخدام فقط إذا كانت توصية حقيقية
             if not is_wait:
                 direction = "BUY" if "شراء" in signal_text or "BUY" in signal_text.upper() else "SELL"
                 db.log_signal(user_id, pair, timeframe, direction)
@@ -179,7 +191,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             pro  = db.is_pro(user_id)
             used = db.free_signals_used(user_id)
 
-            # مدة الصلاحية فقط بدون توقيت
             expiry_map  = {"5m": 20, "15m": 60, "1h": 240, "4h": 960, "1d": 4320}
             expiry_mins = expiry_map.get(timeframe, 60)
 
@@ -202,11 +213,10 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             chunks    = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
 
             extra_buttons = [[InlineKeyboardButton(
-                t(user_id, "📡 توصية جديدة", "📡 New Signal"), callback_data="new_signal")]]
+                t(user_id,"📡 توصية جديدة","📡 New Signal"), callback_data="new_signal")]]
             if not pro:
                 extra_buttons.append([InlineKeyboardButton(
-                    t(user_id, "💎 اشتراك برو — توصيات غير محدودة", "💎 Go Pro — Unlimited Signals"),
-                    callback_data="show_plans")])
+                    t(user_id,"💎 اشتراك برو","💎 Go Pro"), callback_data="show_plans")])
 
             await query.edit_message_text(chunks[0], parse_mode="Markdown",
                                            reply_markup=home_keyboard(user_id, extra_buttons))
@@ -215,6 +225,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         except Exception as e:
             await query.edit_message_text(
-                f"❌ {'حدث خطأ أثناء التحليل' if lang == 'ar' else 'Analysis failed'}.\n`{str(e)[:100]}`",
+                f"❌ {'حدث خطأ' if lang=='ar' else 'Error'}.\n`{str(e)[:100]}`",
                 parse_mode="Markdown", reply_markup=home_keyboard(user_id))
             raise
