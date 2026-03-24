@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import aiohttp
 from datetime import datetime, timezone
-from config import PAIRS, TIMEFRAMES
+from config import PAIRS
 
 TWELVE_KEY = os.getenv("TWELVE_DATA_KEY", "")
 TWELVE_URL = "https://api.twelvedata.com/time_series"
@@ -16,6 +16,14 @@ TWELVE_SYMBOLS = {
     "USDJPY": "USD/JPY",
 }
 
+MTF_MAP = {
+    "5m":  {"trend": "1h",  "structure": "15m", "entry": "5m"},
+    "15m": {"trend": "4h",  "structure": "1h",  "entry": "15m"},
+    "1h":  {"trend": "1d",  "structure": "4h",  "entry": "1h"},
+    "4h":  {"trend": "1d",  "structure": "4h",  "entry": "4h"},
+    "1d":  {"trend": "1d",  "structure": "1d",  "entry": "1d"},
+}
+
 TWELVE_INTERVALS = {
     "5m":  "5min",
     "15m": "15min",
@@ -25,13 +33,11 @@ TWELVE_INTERVALS = {
 }
 
 
-async def fetch_candles(pair: str, timeframe: str) -> pd.DataFrame:
-    symbol   = TWELVE_SYMBOLS.get(pair, pair)
-    interval = TWELVE_INTERVALS.get(timeframe, "1h")
+async def _fetch(symbol: str, interval: str, size: int = 150) -> pd.DataFrame:
     params = {
         "symbol":     symbol,
         "interval":   interval,
-        "outputsize": 200,
+        "outputsize": size,
         "apikey":     TWELVE_KEY,
         "format":     "JSON",
     }
@@ -41,173 +47,207 @@ async def fetch_candles(pair: str, timeframe: str) -> pd.DataFrame:
             data = await resp.json()
 
     if data.get("status") == "error":
-        raise ValueError(f"Twelve Data error: {data.get('message', 'unknown')}")
+        raise ValueError(f"Twelve Data: {data.get('message','unknown')}")
 
     values = data.get("values", [])
     if not values:
-        raise ValueError(f"No data returned for {pair}")
+        raise ValueError("No data returned")
 
     df = pd.DataFrame(values)
-    for col in ["open", "high", "low", "close"]:
+    for col in ["open","high","low","close"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0) if "volume" in df.columns else 0
-    df = df[["open", "high", "low", "close", "volume"]].dropna()
+    df = df[["open","high","low","close","volume"]].dropna()
     df = df.iloc[::-1].reset_index(drop=True)
     return df
 
 
-def candle_dna(df: pd.DataFrame) -> dict:
+async def fetch_candles(pair: str, timeframe: str) -> dict:
+    sym = TWELVE_SYMBOLS.get(pair, pair)
+    mtf = MTF_MAP.get(timeframe, MTF_MAP["1h"])
+    frames = {}
+    for role, tf in mtf.items():
+        interval = TWELVE_INTERVALS.get(tf, "1h")
+        frames[role] = await _fetch(sym, interval)
+    return frames
+
+
+def _ema(series, span):
+    return series.ewm(span=span, adjust=False).mean()
+
+def _rsi(series, period=14):
+    delta = series.diff()
+    gain  = delta.clip(lower=0).rolling(period).mean()
+    loss  = (-delta.clip(upper=0)).rolling(period).mean()
+    return 100 - (100 / (1 + gain / loss.replace(0, np.nan)))
+
+def _atr(df, period=14):
+    h, l, c = df["high"], df["low"], df["close"]
+    tr = pd.concat([(h-l),(h-c.shift()).abs(),(l-c.shift()).abs()], axis=1).max(axis=1)
+    return tr.rolling(period).mean()
+
+def _trend_direction(df) -> str:
+    close = df["close"]
+    e50   = float(_ema(close, 50).iloc[-1])
+    e200  = float(_ema(close, 200).iloc[-1])
+    if e50 > e200 * 1.001:
+        return "bullish"
+    elif e50 < e200 * 0.999:
+        return "bearish"
+    return "neutral"
+
+def _key_levels(df) -> dict:
+    current   = float(df["close"].iloc[-1])
+    h         = df["high"].values
+    l         = df["low"].values
+    tolerance = current * 0.0015
+    res, sup  = [], []
+
+    for i in range(2, len(h)-2):
+        if h[i] > h[i-1] and h[i] > h[i+1]:
+            for j in range(i+2, min(i+40, len(h))):
+                if abs(h[j]-h[i]) < tolerance:
+                    level = round((h[i]+h[j])/2, 5)
+                    if level > current:
+                        res.append(level)
+                    break
+        if l[i] < l[i-1] and l[i] < l[i+1]:
+            for j in range(i+2, min(i+40, len(l))):
+                if abs(l[j]-l[i]) < tolerance:
+                    level = round((l[i]+l[j])/2, 5)
+                    if level < current:
+                        sup.append(level)
+                    break
+
+    return {
+        "resistance": sorted(list(set([round(r,3) for r in res if r > current])))[:3],
+        "support":    sorted(list(set([round(s,3) for s in sup if s < current])), reverse=True)[:3],
+    }
+
+def _structure(df) -> str:
+    recent = df.tail(30)
+    highs, lows = [], []
+    for i in range(2, len(recent)-2):
+        h = recent["high"].iloc
+        l = recent["low"].iloc
+        if h[i] > h[i-1] and h[i] > h[i-2] and h[i] > h[i+1] and h[i] > h[i+2]:
+            highs.append(float(h[i]))
+        if l[i] < l[i-1] and l[i] < l[i-2] and l[i] < l[i+1] and l[i] < l[i+2]:
+            lows.append(float(l[i]))
+
+    if len(highs) >= 2 and len(lows) >= 2:
+        if highs[-1] > highs[-2] and lows[-1] > lows[-2]:
+            return "bullish"
+        if highs[-1] < highs[-2] and lows[-1] < lows[-2]:
+            return "bearish"
+        if highs[-1] > highs[-2] and lows[-1] < lows[-2]:
+            return "choch_bearish"
+        if highs[-1] < highs[-2] and lows[-1] > lows[-2]:
+            return "choch_bullish"
+    return "neutral"
+
+def _momentum(df) -> dict:
+    close     = df["close"]
+    rsi_val   = round(float(_rsi(close).iloc[-1]), 1)
+    macd_line = _ema(close, 12) - _ema(close, 26)
+    signal    = _ema(macd_line, 9)
+    macd_cross= "bullish" if float(macd_line.iloc[-1]) > float(signal.iloc[-1]) else "bearish"
+    return {"rsi": rsi_val, "macd": macd_cross}
+
+def _entry_quality(df) -> dict:
     o = df["open"].values
     h = df["high"].values
     l = df["low"].values
     c = df["close"].values
 
-    body        = np.abs(c - o)
     total_range = h - l + 1e-10
+    body        = np.abs(c - o)
     upper_wick  = h - np.maximum(c, o)
     lower_wick  = np.minimum(c, o) - l
-    direction   = np.where(c > o, 1, -1)
 
-    efficiency    = body / total_range
-    buy_pressure  = lower_wick / total_range
-    sell_pressure = upper_wick / total_range
-    delta_est     = (buy_pressure - sell_pressure) * direction
+    avg20      = np.mean(total_range[-20:])
+    avg5       = np.mean(total_range[-5:])
+    is_squeeze = (avg5 / avg20) < 0.6
 
-    ranges_5  = total_range[-5:]
-    ranges_10 = total_range[-10:-5]
-    exhaustion = "expanding" if np.mean(ranges_5) > np.mean(ranges_10) * 1.2 else \
-                 "exhausting" if np.mean(ranges_5) < np.mean(ranges_10) * 0.7 else "normal"
+    last_upper = upper_wick[-1] / total_range[-1]
+    last_lower = lower_wick[-1] / total_range[-1]
+    rejection  = None
+    if last_upper > 0.6:
+        rejection = "bearish"
+    elif last_lower > 0.6:
+        rejection = "bullish"
 
-    avg_range_20  = np.mean(total_range[-20:])
-    avg_range_5   = np.mean(total_range[-5:])
-    squeeze_ratio = avg_range_5 / avg_range_20
-    is_squeeze    = squeeze_ratio < 0.6
-
-    consecutive = 0
-    last_dir    = direction[-1]
-    for i in range(len(direction)-1, max(len(direction)-10, 0), -1):
-        if direction[i] == last_dir:
-            consecutive += 1
-        else:
-            break
-
-    last_efficiency    = round(float(efficiency[-1]),    3)
-    last_buy_pressure  = round(float(buy_pressure[-1]),  3)
-    last_sell_pressure = round(float(sell_pressure[-1]), 3)
-    last_delta         = round(float(delta_est[-1]),     3)
-    avg_delta_5        = round(float(np.mean(delta_est[-5:])), 3)
-
-    strong_rejection = None
-    if last_sell_pressure > 0.6:
-        strong_rejection = "bearish_rejection"
-    elif last_buy_pressure > 0.6:
-        strong_rejection = "bullish_rejection"
-
-    bull_count = int(np.sum(direction[-10:] == 1))
-    bear_count = int(np.sum(direction[-10:] == -1))
-    trend_consistency = f"{bull_count} صاعدة vs {bear_count} هابطة من آخر 10"
-
-    last_5 = []
-    for i in range(-5, 0):
-        last_5.append({
-            "direction":     "🟢" if direction[i] == 1 else "🔴",
-            "open":          round(float(o[i]), 5),
-            "high":          round(float(h[i]), 5),
-            "low":           round(float(l[i]), 5),
-            "close":         round(float(c[i]), 5),
-            "efficiency":    round(float(efficiency[i]),    2),
-            "buy_pressure":  round(float(buy_pressure[i]),  2),
-            "sell_pressure": round(float(sell_pressure[i]), 2),
-        })
+    immediate = "bullish" if c[-1] > c[-3] else "bearish"
 
     return {
-        "last_efficiency":     last_efficiency,
-        "last_buy_pressure":   last_buy_pressure,
-        "last_sell_pressure":  last_sell_pressure,
-        "last_delta":          last_delta,
-        "avg_delta_5":         avg_delta_5,
-        "exhaustion":          exhaustion,
-        "is_squeeze":          is_squeeze,
-        "squeeze_ratio":       round(float(squeeze_ratio), 2),
-        "consecutive_candles": consecutive,
-        "strong_rejection":    strong_rejection,
-        "trend_consistency":   trend_consistency,
-        "last_5_candles":      last_5,
+        "is_squeeze": is_squeeze,
+        "rejection":  rejection,
+        "immediate":  immediate,
+        "efficiency": round(float(body[-1] / total_range[-1]), 2),
     }
 
 
-def detect_key_levels(df: pd.DataFrame) -> dict:
-    current   = float(df["close"].iloc[-1])
-    h         = df["high"].values
-    l         = df["low"].values
-    tolerance = current * 0.001
+def compute_indicators(frames: dict) -> dict:
+    df_trend     = frames["trend"]
+    df_structure = frames["structure"]
+    df_entry     = frames["entry"]
 
-    resistance_zones = []
-    support_zones    = []
+    current = round(float(df_entry["close"].iloc[-1]), 5)
+    atr_val = round(float(_atr(df_entry).iloc[-1]), 5)
 
-    for i in range(2, len(h) - 2):
-        if h[i] > h[i-1] and h[i] > h[i+1]:
-            for j in range(i+2, min(i+30, len(h))):
-                if abs(h[j] - h[i]) < tolerance and h[j] > current:
-                    resistance_zones.append(round(float((h[i] + h[j]) / 2), 5))
-                    break
-        if l[i] < l[i-1] and l[i] < l[i+1]:
-            for j in range(i+2, min(i+30, len(l))):
-                if abs(l[j] - l[i]) < tolerance and l[j] < current:
-                    support_zones.append(round(float((l[i] + l[j]) / 2), 5))
-                    break
+    trend_dir     = _trend_direction(df_trend)
+    struct_dir    = _structure(df_structure)
+    struct_levels = _key_levels(df_structure)
+    entry_mom     = _momentum(df_entry)
+    entry_q       = _entry_quality(df_entry)
+    entry_levels  = _key_levels(df_entry)
 
-    resistance_zones = sorted(list(set([round(r, 3) for r in resistance_zones if r > current])))[:3]
-    support_zones    = sorted(list(set([round(s, 3) for s in support_zones    if s < current])), reverse=True)[:3]
+    signals = []
+    if trend_dir == "bullish":       signals.append("bullish")
+    elif trend_dir == "bearish":     signals.append("bearish")
+    if struct_dir in ("bullish","choch_bullish"):   signals.append("bullish")
+    elif struct_dir in ("bearish","choch_bearish"): signals.append("bearish")
+    if entry_mom["rsi"] < 40:        signals.append("bullish")
+    elif entry_mom["rsi"] > 60:      signals.append("bearish")
+    if entry_mom["macd"] == "bullish": signals.append("bullish")
+    else:                              signals.append("bearish")
+    if entry_q["immediate"] == "bullish": signals.append("bullish")
+    else:                                 signals.append("bearish")
 
-    return {"resistance": resistance_zones, "support": support_zones}
+    bull_count = signals.count("bullish")
+    bear_count = signals.count("bearish")
 
+    if bull_count >= 4:   confluence = "strong_bullish"
+    elif bull_count == 3: confluence = "bullish"
+    elif bear_count >= 4: confluence = "strong_bearish"
+    elif bear_count == 3: confluence = "bearish"
+    else:                 confluence = "neutral"
 
-def detect_session(timeframe: str) -> dict:
-    now  = datetime.now(timezone.utc)
-    hour = now.hour
+    all_res = sorted(list(set(struct_levels["resistance"] + entry_levels["resistance"])))[:3]
+    all_sup = sorted(list(set(struct_levels["support"]    + entry_levels["support"])),   reverse=True)[:3]
 
+    hour = datetime.now(timezone.utc).hour
     if 8 <= hour < 13:
-        session   = "لندن 🇬🇧"
-        liquidity = "عالية"
+        session, liquidity = "لندن 🇬🇧", "عالية"
     elif 13 <= hour < 17:
-        session   = "تداخل لندن-نيويورك 🔥"
-        liquidity = "أعلى سيولة في اليوم"
+        session, liquidity = "تداخل لندن-نيويورك 🔥", "أعلى سيولة"
     elif 17 <= hour < 22:
-        session   = "نيويورك 🇺🇸"
-        liquidity = "عالية"
-    elif 0 <= hour < 8:
-        session   = "آسيا 🌏"
-        liquidity = "منخفضة"
+        session, liquidity = "نيويورك 🇺🇸", "عالية"
     else:
-        session   = "بين الجلسات"
-        liquidity = "منخفضة جداً"
-
-    warning = None
-    if timeframe in ("5m", "15m") and liquidity in ("منخفضة", "منخفضة جداً"):
-        warning = "⚠️ سيولة منخفضة — إشارات الفريمات الصغيرة أقل موثوقية الآن"
-
-    return {"session": session, "liquidity": liquidity, "hour_utc": hour, "warning": warning}
-
-
-def compute_indicators(df: pd.DataFrame) -> dict:
-    current = round(float(df["close"].iloc[-1]), 5)
-    close   = df["close"]
-    high    = df["high"]
-    low     = df["low"]
-
-    tr  = pd.concat([(high-low), (high-close.shift()).abs(), (low-close.shift()).abs()], axis=1).max(axis=1)
-    atr = round(float(tr.rolling(14).mean().iloc[-1]), 5)
-
-    ema50  = close.ewm(span=50,  adjust=False).mean()
-    ema200 = close.ewm(span=200, adjust=False).mean()
-    trend  = "صاعد" if float(ema50.iloc[-1]) > float(ema200.iloc[-1]) else "هابط"
+        session, liquidity = "آسيا 🌏", "منخفضة"
 
     return {
         "current_price": current,
-        "atr":           atr,
-        "trend":         trend,
-        "dna":           candle_dna(df),
-        "levels":        detect_key_levels(df),
-        "session":       detect_session("1h"),
+        "atr":           atr_val,
+        "session":       session,
+        "liquidity":     liquidity,
+        "confluence":    confluence,
+        "bull_count":    bull_count,
+        "bear_count":    bear_count,
+        "trend":         trend_dir,
+        "structure":     struct_dir,
+        "momentum":      entry_mom,
+        "entry_quality": entry_q,
+        "resistance":    all_res,
+        "support":       all_sup,
     }
