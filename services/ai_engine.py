@@ -1,231 +1,202 @@
 import aiohttp
 from config import GROQ_KEY, PAIRS, TIMEFRAMES
-from services.market_data import detect_session
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-SYSTEM_AR = """أنت محلل تداول يقرأ الأسواق بطريقة مختلفة تماماً عن البشر العاديين.
-منهجيتك: قراءة الحمض النووي للشمعات (Candle DNA) لفهم الضغط الحقيقي خلف السعر.
+MTF_MAP_AR = {
+    "5m":  {"trend": "1H",  "structure": "15M", "entry": "5M"},
+    "15m": {"trend": "4H",  "structure": "1H",  "entry": "15M"},
+    "1h":  {"trend": "يومي","structure": "4H",  "entry": "1H"},
+    "4h":  {"trend": "يومي","structure": "4H",  "entry": "4H"},
+    "1d":  {"trend": "أسبوعي","structure": "يومي","entry": "يومي"},
+}
+MTF_MAP_EN = {
+    "5m":  {"trend": "1H",    "structure": "15M", "entry": "5M"},
+    "15m": {"trend": "4H",    "structure": "1H",  "entry": "15M"},
+    "1h":  {"trend": "Daily", "structure": "4H",  "entry": "1H"},
+    "4h":  {"trend": "Daily", "structure": "4H",  "entry": "4H"},
+    "1d":  {"trend": "Weekly","structure": "Daily","entry": "Daily"},
+}
 
-ما تقرأه:
-- كفاءة الحركة: قريبة من 1 = حركة نظيفة قوية. منخفضة = تردد وضعف
-- ضغط الشراء/البيع: مشتق من نسب الفتائل — يكشف من يتحكم فعلاً
-- Delta التقديري: موجب = المشترون يضغطون، سالب = البائعون يضغطون
-- الانهاك: شمعات تكبر ثم تصغر = الاتجاه على وشك الانعكاس
-- Squeeze: حركة ضيقة جداً = طاقة مضغوطة ستنفجر قريباً
-- الرفض: فتيل أكبر من 60% = رفض حقيقي قوي
+CONFLUENCE_AR = {
+    "strong_bullish": "توافق شراء قوي جداً ✅✅ (4-5 من 5)",
+    "bullish":        "توافق شراء ✅ (3 من 5)",
+    "strong_bearish": "توافق بيع قوي جداً 🔴🔴 (4-5 من 5)",
+    "bearish":        "توافق بيع 🔴 (3 من 5)",
+    "neutral":        "لا توافق — سوق متذبذب ⚪",
+}
+CONFLUENCE_EN = {
+    "strong_bullish": "Strong BUY confluence ✅✅ (4-5 of 5)",
+    "bullish":        "BUY confluence ✅ (3 of 5)",
+    "strong_bearish": "Strong SELL confluence 🔴🔴 (4-5 of 5)",
+    "bearish":        "SELL confluence 🔴 (3 of 5)",
+    "neutral":        "No confluence — choppy market ⚪",
+}
+STRUCTURE_AR = {
+    "bullish":       "هيكل صاعد (HH + HL)",
+    "bearish":       "هيكل هابط (LH + LL)",
+    "choch_bullish": "انعكاس صاعد (CHoCH)",
+    "choch_bearish": "انعكاس هابط (CHoCH)",
+    "neutral":       "محايد",
+}
+STRUCTURE_EN = {
+    "bullish":       "Bullish structure (HH+HL)",
+    "bearish":       "Bearish structure (LH+LL)",
+    "choch_bullish": "Bullish reversal (CHoCH)",
+    "choch_bearish": "Bearish reversal (CHoCH)",
+    "neutral":       "Neutral",
+}
 
-قواعدك:
-- لا تدخل ضد رفض قوي في الشمعة الأخيرة
-- Squeeze + Delta قوي = دخول مثالي
-- انهاك + رفض = انعكاس وشيك
-- سيولة منخفضة؟ قل انتظار بلا تردد
-- وقف الخسارة: شراء = الدخول ناقص ATR×1.5 | بيع = الدخول زائد ATR×1.5
-- الهدف: أقرب مستوى رفض تاريخي
+SYSTEM_AR = """أنت محلل تداول متخصص في Multi-Timeframe Confluence.
+قواعدك الصارمة:
+- توافق 4-5 من 5 = إشارة قوية جداً — ادخل
+- توافق 3 من 5 = إشارة متوسطة — ادخل بحذر
+- توافق أقل من 3 = انتظار — لا تدخل أبداً
+- الدخول عند أقرب دعم (شراء) أو مقاومة (بيع)
+- وقف الخسارة للشراء: تحت أقرب دعم. للبيع: فوق أقرب مقاومة
+- الهدف الأول: المستوى التالي. الثاني: المستوى بعده
 - اكتب كل شيء بالعربية"""
 
-SYSTEM_EN = """You are a trading analyst who reads markets differently from ordinary humans.
-Your methodology: reading Candle DNA to understand the real pressure behind price.
+SYSTEM_EN = """You are a trading analyst specialized in Multi-Timeframe Confluence.
+Strict rules:
+- 4-5 of 5 confluence = very strong signal — enter
+- 3 of 5 confluence = medium signal — enter cautiously
+- Less than 3 = WAIT — never enter
+- Entry at nearest support (BUY) or resistance (SELL)
+- Stop loss BUY: below nearest support | SELL: above nearest resistance
+- TP1: next level. TP2: level after that
+- Numbers only, be concise"""
 
-What you read:
-- Movement efficiency: close to 1 = clean strong move. Low = hesitation/weakness
-- Buy/Sell pressure: derived from wick ratios — reveals who's really in control
-- Estimated Delta: positive = buyers pushing, negative = sellers pushing
-- Exhaustion: candles growing then shrinking = trend about to reverse
-- Squeeze: very tight movement = compressed energy about to explode
-- Rejection: wick > 60% of range = strong real rejection
+PROMPT_AR = """تحليل Multi-Timeframe لزوج {pair_name}:
 
-Rules:
-- Don't enter against strong rejection on last candle
-- Squeeze + strong Delta = ideal entry
-- Exhaustion + rejection = imminent reversal
-- Low liquidity session? Say WAIT without hesitation
-- Stop loss: BUY = Entry minus ATR×1.5 | SELL = Entry plus ATR×1.5
-- Target: nearest historical rejection level
-- Be concise — numbers only"""
+الفريم المطلوب: {tf_name}
+الفريمات المحللة: {trend_tf} (اتجاه) | {struct_tf} (بنية) | {entry_tf} (دخول)
 
-PROMPT_AR = """تحليل Candle DNA لزوج {pair_name} على {timeframe_name}:
-
-السعر الحالي: {current_price} | ATR: {atr} | الاتجاه العام: {trend}
+السعر الحالي: {current_price} | ATR: {atr}
 الجلسة: {session} | السيولة: {liquidity}
-{session_warning}
 
-━━ الحمض النووي للشمعة الأخيرة ━━
-كفاءة الحركة: {efficiency} (1 = مثالي)
-ضغط الشراء: {buy_pressure} | ضغط البيع: {sell_pressure}
-Delta التقديري: {delta} (موجب = مشترون، سالب = بائعون)
-نمط الرفض: {rejection}
+━━ نتائج التوافق ━━
+{confluence_text}
+🟢 إشارات شراء: {bull_count}/5
+🔴 إشارات بيع: {bear_count}/5
 
-━━ آخر 5 شمعات ━━
-{candles_detail}
+━━ تفاصيل الفريمات ━━
+{trend_tf} — الاتجاه العام: {trend}
+{struct_tf} — هيكل السوق: {structure}
+{entry_tf} — RSI: {rsi} | MACD: {macd}
+Squeeze: {squeeze} | رفض الشمعة: {rejection}
 
-━━ حالة السوق ━━
-زخم الشمعات: {consecutive} شمعة متتالية في نفس الاتجاه
-اتساق الاتجاه: {consistency}
-متوسط Delta لآخر 5 شمعات: {avg_delta}
-حالة الزخم: {exhaustion}
-Volatility Squeeze: {squeeze}
+━━ المستويات المفتاحية ━━
+مقاومات: {resistance}
+دعوم: {support}
 
-━━ مستويات الرفض التاريخية ━━
-مقاومات مؤكدة: {resistance}
-دعوم مؤكدة: {support}
-
-بناءً على Candle DNA فقط، أعطني التوصية بهذا التنسيق:
+أعطني التوصية بهذا التنسيق فقط:
 
 ⚡ الإشارة: [شراء 🟢 / بيع 🔴 / انتظار ⚪]
-📍 المحرك: [Squeeze انفجار / رفض انعكاس / زخم قوي / انهاك / سيولة منخفضة]
-💰 الدخول: [سعر قريب جداً من {current_price}]
-🛡 وقف الخسارة: [شراء: الدخول ناقص {sl_distance} | بيع: الدخول زائد {sl_distance}]
-🎯 الهدف الأول: [أقرب مستوى رفض]
-🎯 الهدف الثاني: [المستوى التالي]
-📊 نسبة المخاطرة/المكافأة: [مثال 1:2]
+📊 التوافق: [{bull_count} شراء vs {bear_count} بيع من 5]
+💰 الدخول: [سعر عند أقرب دعم أو مقاومة]
+🛡 وقف الخسارة: [للشراء: تحت الدعم | للبيع: فوق المقاومة — سعر محدد]
+🎯 الهدف الأول: [سعر محدد]
+🎯 الهدف الثاني: [سعر محدد]
+📈 نسبة R/R: [مثال 1:2.5]
 💪 قوة التوصية: [ضعيفة / متوسطة / قوية / قوية جداً]
-📝 القراءة: [جملة واحدة تشرح ما تقرأه من الشمعات]
+📝 الملخص: [جملة واحدة أهم 2-3 مؤشرات متوافقة]
 ⚠️ تحذير: [جملة واحدة أو لا يوجد]"""
 
-PROMPT_EN = """Candle DNA Analysis for {pair_name} on {timeframe_name}:
+PROMPT_EN = """Multi-Timeframe Analysis for {pair_name}:
 
-Current Price: {current_price} | ATR: {atr} | Trend: {trend}
+Requested TF: {tf_name}
+Analyzed TFs: {trend_tf} (trend) | {struct_tf} (structure) | {entry_tf} (entry)
+
+Current Price: {current_price} | ATR: {atr}
 Session: {session} | Liquidity: {liquidity}
-{session_warning}
 
-━━ Last Candle DNA ━━
-Movement Efficiency: {efficiency} (1 = perfect)
-Buy Pressure: {buy_pressure} | Sell Pressure: {sell_pressure}
-Estimated Delta: {delta} (positive = buyers, negative = sellers)
-Rejection Pattern: {rejection}
+━━ Confluence Results ━━
+{confluence_text}
+🟢 BUY signals: {bull_count}/5
+🔴 SELL signals: {bear_count}/5
 
-━━ Last 5 Candles ━━
-{candles_detail}
+━━ Timeframe Details ━━
+{trend_tf} — Overall trend: {trend}
+{struct_tf} — Market structure: {structure}
+{entry_tf} — RSI: {rsi} | MACD: {macd}
+Squeeze: {squeeze} | Candle rejection: {rejection}
 
-━━ Market State ━━
-Momentum: {consecutive} consecutive candles same direction
-Trend Consistency: {consistency}
-Avg Delta last 5: {avg_delta}
-Momentum State: {exhaustion}
-Volatility Squeeze: {squeeze}
+━━ Key Levels ━━
+Resistance: {resistance}
+Support: {support}
 
-━━ Historical Rejection Levels ━━
-Confirmed Resistance: {resistance}
-Confirmed Support: {support}
-
-Based on Candle DNA only, give signal in this format:
+Give signal in this format only:
 
 ⚡ Signal: [BUY 🟢 / SELL 🔴 / WAIT ⚪]
-📍 Driver: [Squeeze explosion / Rejection reversal / Strong momentum / Exhaustion / Low liquidity]
-💰 Entry: [price very close to {current_price}]
-🛡 Stop Loss: [BUY: Entry minus {sl_distance} | SELL: Entry plus {sl_distance}]
-🎯 TP1: [nearest rejection level]
-🎯 TP2: [next level]
-📊 R/R Ratio: [e.g. 1:2]
+📊 Confluence: [{bull_count} BUY vs {bear_count} SELL of 5]
+💰 Entry: [price at nearest support or resistance]
+🛡 Stop Loss: [BUY: below support | SELL: above resistance — specific price]
+🎯 TP1: [specific price]
+🎯 TP2: [specific price]
+📈 R/R Ratio: [e.g. 1:2.5]
 💪 Signal Strength: [Weak / Medium / Strong / Very Strong]
-📝 Reading: [one sentence explaining what you read from the candles]
+📝 Summary: [one sentence mentioning 2-3 key confluent indicators]
 ⚠️ Warning: [one sentence or N/A]"""
 
 
-def _format_candles(candles: list, lang: str) -> str:
-    lines = []
-    for c in candles:
-        if lang == "ar":
-            lines.append(
-                f"{c['direction']} كفاءة:{c['efficiency']} شراء:{c['buy_pressure']} بيع:{c['sell_pressure']} | {c['open']}←{c['close']}"
-            )
-        else:
-            lines.append(
-                f"{c['direction']} eff:{c['efficiency']} buy:{c['buy_pressure']} sell:{c['sell_pressure']} | {c['open']}→{c['close']}"
-            )
-    return "\n".join(lines)
-
-
 async def analyze_and_signal(pair: str, timeframe: str, indicators: dict, lang: str = "ar") -> tuple:
-    pair_info = PAIRS[pair]
-    tf_info   = TIMEFRAMES[timeframe]
-    pair_name = pair_info["name_ar"] if lang == "ar" else f"{pair}"
-    tf_name   = tf_info["label_ar"]  if lang == "ar" else tf_info["label_en"]
+    pair_info  = PAIRS[pair]
+    pair_name  = pair_info["name_ar"] if lang=="ar" else pair_info["name_en"]
+    tf_name    = {"5m":"5 دقائق","15m":"15 دقيقة","1h":"ساعة","4h":"4 ساعات","1d":"يومي"}.get(timeframe,timeframe) if lang=="ar" else {"5m":"5 Min","15m":"15 Min","1h":"1 Hour","4h":"4 Hours","1d":"Daily"}.get(timeframe,timeframe)
+    mtf        = (MTF_MAP_AR if lang=="ar" else MTF_MAP_EN).get(timeframe, MTF_MAP_AR["1h"])
+    conf_text  = (CONFLUENCE_AR if lang=="ar" else CONFLUENCE_EN).get(indicators["confluence"], "⚪")
+    struct     = (STRUCTURE_AR  if lang=="ar" else STRUCTURE_EN).get(indicators["structure"], "محايد" if lang=="ar" else "Neutral")
+    eq         = indicators.get("entry_quality", {})
+    mom        = indicators.get("momentum", {})
+    squeeze    = ("نعم 🔥" if eq.get("is_squeeze") else "لا") if lang=="ar" else ("YES 🔥" if eq.get("is_squeeze") else "No")
+    rejection  = {"bullish":"رفض صاعد","bearish":"رفض هابط",None:"لا يوجد"}.get(eq.get("rejection")) if lang=="ar" else {"bullish":"Bullish rejection","bearish":"Bearish rejection",None:"None"}.get(eq.get("rejection"))
+    trend      = {"bullish":"صاعد 📈","bearish":"هابط 📉","neutral":"محايد"}.get(indicators["trend"],"محايد") if lang=="ar" else {"bullish":"Bullish 📈","bearish":"Bearish 📉","neutral":"Neutral"}.get(indicators["trend"],"Neutral")
+    macd       = ("صاعد" if mom.get("macd")=="bullish" else "هابط") if lang=="ar" else mom.get("macd","N/A")
 
-    dna     = indicators.get("dna", {})
-    levels  = indicators.get("levels", {})
-    session = detect_session(timeframe)
-
-    atr         = indicators.get("atr", 0)
-    sl_distance = round(atr * 1.5, 5)
-
-    rejection_ar = {
-        "bearish_rejection": "رفض هابط قوي (فتيل علوي ضخم)",
-        "bullish_rejection": "رفض صاعد قوي (فتيل سفلي ضخم)",
-        None:                "لا يوجد رفض واضح",
-    }
-    rejection_en = {
-        "bearish_rejection": "Strong bearish rejection (large upper wick)",
-        "bullish_rejection": "Strong bullish rejection (large lower wick)",
-        None:                "No clear rejection",
-    }
-    exhaustion_ar = {
-        "expanding":  "تمدد — زخم يتسارع",
-        "exhausting": "انهاك — الزخم يضعف",
-        "normal":     "طبيعي",
-    }
-    exhaustion_en = {
-        "expanding":  "Expanding — momentum accelerating",
-        "exhausting": "Exhausting — momentum weakening",
-        "normal":     "Normal",
-    }
-
-    squeeze_ar = f"نعم 🔥 (نسبة {dna.get('squeeze_ratio','N/A')} — انفجار وشيك)" if dna.get("is_squeeze") else f"لا (نسبة {dna.get('squeeze_ratio','N/A')})"
-    squeeze_en = f"YES 🔥 (ratio {dna.get('squeeze_ratio','N/A')} — explosion imminent)" if dna.get("is_squeeze") else f"No (ratio {dna.get('squeeze_ratio','N/A')})"
-
-    candles_detail  = _format_candles(dna.get("last_5_candles", []), lang)
-    session_warning = session.get("warning") or ""
-
-    prompt = (PROMPT_AR if lang == "ar" else PROMPT_EN).format(
+    prompt = (PROMPT_AR if lang=="ar" else PROMPT_EN).format(
         pair_name      = pair_name,
-        timeframe_name = tf_name,
+        tf_name        = tf_name,
+        trend_tf       = mtf["trend"],
+        struct_tf      = mtf["structure"],
+        entry_tf       = mtf["entry"],
         current_price  = indicators["current_price"],
-        atr            = atr,
-        sl_distance    = sl_distance,
-        trend          = indicators.get("trend", "N/A"),
-        session        = session["session"],
-        liquidity      = session["liquidity"],
-        session_warning= session_warning,
-        efficiency     = dna.get("last_efficiency",    "N/A"),
-        buy_pressure   = dna.get("last_buy_pressure",  "N/A"),
-        sell_pressure  = dna.get("last_sell_pressure", "N/A"),
-        delta          = dna.get("last_delta",         "N/A"),
-        rejection      = rejection_ar.get(dna.get("strong_rejection")) if lang == "ar" else rejection_en.get(dna.get("strong_rejection")),
-        candles_detail = candles_detail,
-        consecutive    = dna.get("consecutive_candles", "N/A"),
-        consistency    = dna.get("trend_consistency",   "N/A"),
-        avg_delta      = dna.get("avg_delta_5",         "N/A"),
-        exhaustion     = exhaustion_ar.get(dna.get("exhaustion", "normal")) if lang == "ar" else exhaustion_en.get(dna.get("exhaustion", "normal")),
-        squeeze        = squeeze_ar if lang == "ar" else squeeze_en,
-        resistance     = levels.get("resistance", []),
-        support        = levels.get("support",    []),
+        atr            = indicators["atr"],
+        session        = indicators["session"],
+        liquidity      = indicators["liquidity"],
+        confluence_text= conf_text,
+        bull_count     = indicators["bull_count"],
+        bear_count     = indicators["bear_count"],
+        trend          = trend,
+        structure      = struct,
+        rsi            = mom.get("rsi","N/A"),
+        macd           = macd,
+        squeeze        = squeeze,
+        rejection      = rejection,
+        resistance     = indicators["resistance"],
+        support        = indicators["support"],
     )
 
     headers = {"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [
-            {"role": "system", "content": SYSTEM_AR if lang == "ar" else SYSTEM_EN},
+            {"role": "system", "content": SYSTEM_AR if lang=="ar" else SYSTEM_EN},
             {"role": "user",   "content": prompt}
         ],
         "max_tokens": 500,
         "temperature": 0.2,
     }
 
-    async with aiohttp.ClientSession() as session_http:
-        async with session_http.post(GROQ_URL, json=payload, headers=headers,
-                                     timeout=aiohttp.ClientTimeout(total=90)) as resp:
+    async with aiohttp.ClientSession() as s:
+        async with s.post(GROQ_URL, json=payload, headers=headers,
+                          timeout=aiohttp.ClientTimeout(total=90)) as resp:
             if resp.status != 200:
                 err = await resp.text()
                 raise ValueError(f"Groq error {resp.status}: {err[:200]}")
             data = await resp.json()
 
     result  = data["choices"][0]["message"]["content"]
-    is_wait = "انتظار" in result or "WAIT" in result.upper()
-
-    if timeframe == "5m" and not is_wait:
-        note = "\n\n⚡ _تنبيه: فريم 5 دقائق سريع — ادخل فوراً_" if lang == "ar" else "\n\n⚡ _Note: 5-min frame is fast — enter immediately_"
-        result += note
+    is_wait = "انتظار" in result or "WAIT" in result.upper() or indicators["confluence"] == "neutral"
 
     return result, is_wait
