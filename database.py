@@ -28,7 +28,8 @@ def init():
             plan          TEXT DEFAULT 'free',
             plan_expires  INTEGER DEFAULT 0,
             total_signals INTEGER DEFAULT 0,
-            free_used     INTEGER DEFAULT 0
+            free_used     INTEGER DEFAULT 0,
+            last_signal   INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS signals_log (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,6 +88,20 @@ def can_use(user_id):
         return True
     return free_signals_used(user_id) < FREE_SIGNALS
 
+COOLDOWN_SECONDS = 120
+
+def check_cooldown(user_id) -> int:
+    row = get_user(user_id)
+    if not row:
+        return 0
+    elapsed   = int(time.time()) - (row["last_signal"] or 0)
+    remaining = COOLDOWN_SECONDS - elapsed
+    return max(0, remaining)
+
+def update_last_signal(user_id):
+    with db() as c:
+        c.execute("UPDATE users SET last_signal=? WHERE id=?", (int(time.time()), user_id))
+
 def log_signal(user_id, pair, timeframe, direction):
     with db() as c:
         c.execute(
@@ -96,14 +111,26 @@ def log_signal(user_id, pair, timeframe, direction):
         c.execute("""
             UPDATE users SET
                 total_signals = total_signals + 1,
-                free_used = CASE WHEN plan='free' THEN free_used+1 ELSE free_used END
+                free_used = CASE WHEN plan='free' THEN free_used+1 ELSE free_used END,
+                last_signal = ?
             WHERE id=?
-        """, (user_id,))
+        """, (int(time.time()), user_id))
 
 def activate_pro(user_id, months):
     expires = int(time.time()) + months * 30 * 24 * 3600
     with db() as c:
         c.execute("UPDATE users SET plan='pro', plan_expires=? WHERE id=?", (expires, user_id))
+
+def add_days(user_id, days):
+    row = get_user(user_id)
+    if not row:
+        return False
+    now        = int(time.time())
+    base       = max(row["plan_expires"], now)
+    new_expires= base + days * 24 * 3600
+    with db() as c:
+        c.execute("UPDATE users SET plan='pro', plan_expires=? WHERE id=?", (new_expires, user_id))
+    return True
 
 def add_payment(user_id, plan, amount, coin, wallet):
     with db() as c:
@@ -139,3 +166,17 @@ def pending_payments():
         return c.execute(
             "SELECT * FROM payments WHERE status='pending' ORDER BY created DESC"
         ).fetchall()
+
+def get_all_users(limit=50):
+    with db() as c:
+        return c.execute(
+            "SELECT * FROM users ORDER BY joined DESC LIMIT ?", (limit,)
+        ).fetchall()
+
+def search_user(query: str):
+    with db() as c:
+        if query.isdigit():
+            return c.execute("SELECT * FROM users WHERE id=?", (int(query),)).fetchone()
+        return c.execute(
+            "SELECT * FROM users WHERE username LIKE ?", (f"%{query}%",)
+        ).fetchone()
