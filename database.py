@@ -1,4 +1,4 @@
-import sqlite3, time, calendar
+import sqlite3, time
 from contextlib import contextmanager
 from config import DB_FILE
 
@@ -29,7 +29,8 @@ def init():
             plan_expires  INTEGER DEFAULT 0,
             total_signals INTEGER DEFAULT 0,
             free_used     INTEGER DEFAULT 0,
-            last_signal   INTEGER DEFAULT 0
+            last_signal   INTEGER DEFAULT 0,
+            free_reset_at INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS signals_log (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,19 +75,47 @@ def get_lang(user_id):
     row = get_user(user_id)
     return row["lang"] if row else "ar"
 
-def is_pro(user_id):
+def is_pro(user_id) -> bool:
+    """التحقق الحقيقي — بناءً على الوقت الفعلي."""
     row = get_user(user_id)
     return bool(row and row["plan"] == "pro" and row["plan_expires"] > time.time())
 
-def free_signals_used(user_id):
+def _get_free_used(user_id) -> int:
+    """
+    يحسب عدد الصفقات المجانية المستخدمة منذ آخر مرة أصبح فيها المستخدم على الخطة المجانية.
+    هذا يصلح بق: لو انتهى اشتراكه، يبدأ عداد جديد.
+    """
     row = get_user(user_id)
-    return row["free_used"] if row else 0
+    if not row:
+        return 0
 
-def can_use(user_id):
+    # إذا كان برو حالياً → لا نحسب
+    if is_pro(user_id):
+        return 0
+
+    # إذا انتهى الاشتراك مؤخراً → احسب الصفقات بعد انتهائه فقط
+    plan_expired_at = row["plan_expires"] if row["plan_expires"] else 0
+    count_since     = max(plan_expired_at, row["free_reset_at"] or 0)
+
+    if count_since > 0:
+        with db() as c:
+            r = c.execute(
+                "SELECT COUNT(*) as cnt FROM signals_log WHERE user_id=? AND created>?",
+                (user_id, count_since)
+            ).fetchone()
+            return r["cnt"] if r else 0
+
+    # مستخدم جديد لم يشترك قط
+    return row["free_used"] or 0
+
+def free_signals_used(user_id) -> int:
+    return _get_free_used(user_id)
+
+def can_use(user_id) -> bool:
     from config import FREE_SIGNALS
     if is_pro(user_id):
         return True
-    return free_signals_used(user_id) < FREE_SIGNALS
+    return _get_free_used(user_id) < FREE_SIGNALS
 
 COOLDOWN_SECONDS = 120
 
@@ -98,38 +127,43 @@ def check_cooldown(user_id) -> int:
     remaining = COOLDOWN_SECONDS - elapsed
     return max(0, remaining)
 
-def update_last_signal(user_id):
-    with db() as c:
-        c.execute("UPDATE users SET last_signal=? WHERE id=?", (int(time.time()), user_id))
-
 def log_signal(user_id, pair, timeframe, direction):
+    """يسجّل الصفقة — يستخدم is_pro() الفعلية وليس الـ plan field."""
+    pro = is_pro(user_id)
     with db() as c:
         c.execute(
             "INSERT INTO signals_log(user_id,pair,timeframe,direction,created) VALUES(?,?,?,?,?)",
             (user_id, pair, timeframe, direction, int(time.time()))
         )
+        # free_used يزيد فقط إذا لم يكن برو فعلياً
         c.execute("""
             UPDATE users SET
                 total_signals = total_signals + 1,
-                free_used = CASE WHEN plan='free' THEN free_used+1 ELSE free_used END,
-                last_signal = ?
+                free_used     = CASE WHEN ? = 0 THEN free_used + 1 ELSE free_used END,
+                last_signal   = ?
             WHERE id=?
-        """, (int(time.time()), user_id))
+        """, (1 if pro else 0, int(time.time()), user_id))
 
 def activate_pro(user_id, months):
     expires = int(time.time()) + months * 30 * 24 * 3600
     with db() as c:
-        c.execute("UPDATE users SET plan='pro', plan_expires=? WHERE id=?", (expires, user_id))
+        c.execute(
+            "UPDATE users SET plan='pro', plan_expires=? WHERE id=?",
+            (expires, user_id)
+        )
 
 def add_days(user_id, days):
     row = get_user(user_id)
     if not row:
         return False
-    now        = int(time.time())
-    base       = max(row["plan_expires"], now)
-    new_expires= base + days * 24 * 3600
+    now         = int(time.time())
+    base        = max(row["plan_expires"] or now, now)
+    new_expires = base + days * 24 * 3600
     with db() as c:
-        c.execute("UPDATE users SET plan='pro', plan_expires=? WHERE id=?", (new_expires, user_id))
+        c.execute(
+            "UPDATE users SET plan='pro', plan_expires=? WHERE id=?",
+            (new_expires, user_id)
+        )
     return True
 
 def add_payment(user_id, plan, amount, coin, wallet):
@@ -142,8 +176,10 @@ def add_payment(user_id, plan, amount, coin, wallet):
 
 def confirm_payment(pay_id, user_id, months):
     with db() as c:
-        c.execute("UPDATE payments SET status='confirmed',confirmed=? WHERE id=?",
-                  (int(time.time()), pay_id))
+        c.execute(
+            "UPDATE payments SET status='confirmed',confirmed=? WHERE id=?",
+            (int(time.time()), pay_id)
+        )
     activate_pro(user_id, months)
 
 def all_users_count():
