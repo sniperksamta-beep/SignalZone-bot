@@ -14,6 +14,9 @@ YOUR_SOL          = os.getenv("SOL_ADDRESS", "")
 
 ADMIN_IDS         = [int(x) for x in os.getenv("ADMIN_IDS", "0").split(",") if x.strip().isdigit()]
 
+# حساب الدعم الفني — ضع يوزرنيم تيليغرام الخاص بك
+SUPPORT_USERNAME  = os.getenv("SUPPORT_USERNAME", "YourUsername")
+
 FREE_SIGNALS      = 4
 PRICE_MONTHLY     = 35
 PRICE_3MONTH      = 90
