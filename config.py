@@ -27,7 +27,7 @@ DB_FILE           = "tradeai.db"
 PAIRS = {
     "XAUUSD": {"name_ar": "ذهب / دولار",      "name_en": "Gold / USD",       "emoji": "🥇", "yahoo": "XAUUSD=X"},
     "BTCUSD": {"name_ar": "بيتكوين / دولار",  "name_en": "Bitcoin / USD",    "emoji": "₿",  "yahoo": "BTC-USD"},
-    "ETHUSD": {"name_ar": "إيثيريوم / دولار", "name_en": "Ethereum / USD",   "emoji": "Ξ",  "yahoo": "ETH-USD"},
+    "ETHUSD": {"name_ar": "إيثيريوم / دولار", "name_en": "Ethereum / USD",   "emoji": "🔷",  "yahoo": "ETH-USD"},
     "EURUSD": {"name_ar": "يورو / دولار",      "name_en": "EUR / USD",        "emoji": "💶", "yahoo": "EURUSD=X"},
     "USDJPY": {"name_ar": "دولار / ين",        "name_en": "USD / JPY",        "emoji": "💴", "yahoo": "USDJPY=X"},
 }
