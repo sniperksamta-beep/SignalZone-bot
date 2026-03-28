@@ -352,8 +352,8 @@ def _compute_precise_sl(df, timeframe: str, levels: dict) -> dict:
     sl_buy = round(local_low - margin, 5)
 
     # تأكد من حد أدنى ATR × 0.5 وحد أقصى ATR × 2
-    min_dist = atr_val * 0.5
-    max_dist = atr_val * 2.0
+    min_dist = atr_val * 1.2
+    max_dist = atr_val * 3.0
 
     sl_buy_dist = current - sl_buy
     if sl_buy_dist < min_dist:
