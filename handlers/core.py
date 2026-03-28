@@ -238,7 +238,9 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             # تسجيل فقط إذا كانت توصية حقيقية
             if not is_wait:
                 direction = "BUY" if "شراء" in signal_text or "BUY" in signal_text.upper() else "SELL"
-                db.log_signal(user_id, pair, timeframe, direction)
+                db.log_signal(user_id, pair, timeframe, direction) else:
+                db.update_last_signal(user_id)  # cooldown حتى للانتظار
+
 
             pro  = db.is_pro(user_id)
             used = db.free_signals_used(user_id)
