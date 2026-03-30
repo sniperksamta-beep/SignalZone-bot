@@ -22,7 +22,7 @@ PRICE_MONTHLY     = 35
 PRICE_3MONTH      = 90
 
 BOT_NAME          = "SignalsZone"
-DB_FILE           = "tradeai.db"
+DB_FILE           = os.getenv("DB_PATH", "tradeai.db")
 
 PAIRS = {
     "XAUUSD": {"name_ar": "ذهب / دولار",      "name_en": "Gold / USD",       "emoji": "🥇", "yahoo": "XAUUSD=X"},
