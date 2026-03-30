@@ -8,7 +8,7 @@ from handlers.core    import start_handler, callback_handler
 from handlers.payment import (
     upgrade_handler, plans_callback,
     confirm_cmd, adddays_cmd, userinfo_cmd, users_cmd, stats_cmd,
-    broadcast_cmd
+    broadcast_cmd, forcerestart_cmd
 )
 
 logging.basicConfig(
@@ -31,7 +31,8 @@ def main():
     app.add_handler(CommandHandler("userinfo", userinfo_cmd))
     app.add_handler(CommandHandler("users",    users_cmd))
     app.add_handler(CommandHandler("stats",    stats_cmd))
-    app.add_handler(CommandHandler("broadcast", broadcast_cmd))
+    app.add_handler(CommandHandler("broadcast",    broadcast_cmd))
+    app.add_handler(CommandHandler("forcerestart", forcerestart_cmd))
 
     # الأزرار
     app.add_handler(CallbackQueryHandler(plans_callback,
