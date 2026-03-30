@@ -330,3 +330,67 @@ async def broadcast_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"الإجمالي: `{len(users)}`",
         parse_mode="Markdown"
     )
+
+
+async def forcerestart_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    /forcerestart — يرسل لكل المستخدمين رسالة ترحيب جديدة
+    تُعيد تشغيل تجربة البوت لديهم تلقائياً.
+    """
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+
+    users = db.get_all_users(limit=9999)
+    if not users:
+        await update.message.reply_text("❌ لا يوجد مستخدمون.")
+        return
+
+    status_msg = await update.message.reply_text(
+        f"🔄 جارٍ إعادة تشغيل البوت لـ {len(users)} مستخدم..."
+    )
+
+    sent = failed = blocked = 0
+
+    for user in users:
+        lang = db.get_lang(user["id"])
+        try:
+            if lang == "ar":
+                text = (
+                    f"🔄 *تم تحديث {BOT_NAME}!*\n\n"
+                    f"اضغط الزر أدناه للعودة للرئيسية والاستمرار."
+                )
+                btn_label = "🏠 ابدأ من جديد"
+            else:
+                text = (
+                    f"🔄 *{BOT_NAME} has been updated!*\n\n"
+                    f"Tap the button below to return to home."
+                )
+                btn_label = "🏠 Restart"
+
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton(btn_label, callback_data="go_home")
+            ]])
+
+            await ctx.bot.send_message(
+                user["id"], text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+            sent += 1
+        except Exception as e:
+            err = str(e).lower()
+            if any(x in err for x in ["blocked", "deactivated", "not found", "forbidden"]):
+                blocked += 1
+            else:
+                failed += 1
+
+        import asyncio
+        await asyncio.sleep(0.05)
+
+    await status_msg.edit_text(
+        f"✅ *تم إعادة التشغيل*\n\n"
+        f"وصل: `{sent}`\n"
+        f"محجوب/محذوف: `{blocked}`\n"
+        f"فشل: `{failed}`",
+        parse_mode="Markdown"
+    )
