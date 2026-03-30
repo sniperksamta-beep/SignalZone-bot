@@ -126,7 +126,7 @@ def check_cooldown(user_id) -> int:
     elapsed   = int(time.time()) - (row["last_signal"] or 0)
     remaining = COOLDOWN_SECONDS - elapsed
     return max(0, remaining)
- def update_last_signal(user_id):
+def update_last_signal(user_id):
     with db() as c:
         c.execute("UPDATE users SET last_signal=? WHERE id=?", (int(time.time()), user_id))
 
