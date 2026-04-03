@@ -34,8 +34,9 @@ async def send_home(target, user_id, edit=False):
         plan_badge = "⭐ برو — غير محدود" if pro else f"🆓 مجاني — {rem}/{FREE_SIGNALS} متبقية"
         text = (
             f"📡 *{BOT_NAME}*\n\n"
-            f"توصيات تداول بتحليل 3 فريمات متزامنة\n"
-            f"+ طبقة مضاربة للفريمات الصغيرة.\n\n"
+            f"🧠 محرك تحليل مؤسسي — 15+ مؤشر مرجّح\n"
+            f"📊 نظام نقاط 0-100 — الرياضيات تقرر\n"
+            f"⚡ طبقة Smart Money: Order Blocks + FVG + مسح السيولة\n\n"
             f"*الأزواج المتاحة:*\n"
             + "\n".join([f"{v['emoji']} {v['name_ar']}" for v in PAIRS.values()])
             + f"\n\n━━━━━━━━━━━━━━━━\n"
@@ -55,8 +56,9 @@ async def send_home(target, user_id, edit=False):
         plan_badge = "⭐ Pro — Unlimited" if pro else f"🆓 Free — {rem}/{FREE_SIGNALS} left"
         text = (
             f"📡 *{BOT_NAME}*\n\n"
-            f"Trading signals using 3-timeframe confluence\n"
-            f"+ scalping layer for small timeframes.\n\n"
+            f"🧠 Institutional analysis engine — 15+ weighted indicators\n"
+            f"📊 0-100 scoring system — math decides\n"
+            f"⚡ Smart Money layer: Order Blocks + FVG + Liquidity Sweeps\n\n"
             f"*Available Pairs:*\n"
             + "\n".join([f"{v['emoji']} {v['name_en']}" for v in PAIRS.values()])
             + f"\n\n━━━━━━━━━━━━━━━━\n"
@@ -127,7 +129,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "new_signal":
-        # فحص الحد المجاني
         if not db.can_use(user_id):
             text = (
                 f"⚠️ *استنفدت {FREE_SIGNALS} توصيات المجانية.*\n\n"
@@ -147,7 +148,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # فحص الـ Cooldown
         remaining = db.check_cooldown(user_id)
         if remaining > 0:
             mins = remaining // 60
@@ -165,7 +165,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # عرض الأزواج
         buttons = []
         for pair_key, pair_info in PAIRS.items():
             name = pair_info["name_ar"] if t(user_id,"ar","en") == "ar" else pair_info["name_en"]
@@ -212,16 +211,18 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         wait_text = (
             f"⏳ *جارٍ تحليل {pair_name} على {tf_name}...*\n\n"
             f"🔍 جلب 3 فريمات متزامنة...\n"
-            f"📊 حساب التوافق...\n"
-            f"⚡ تحليل طبقة المضاربة...\n"
-            f"🤖 الذكاء الاصطناعي يحلل...\n\n"
+            f"📊 حساب 15+ مؤشر مرجّح...\n"
+            f"🧠 تحليل Smart Money...\n"
+            f"⚡ تشغيل محرك النقاط...\n"
+            f"🤖 توليد التقرير...\n\n"
             f"_قد يستغرق هذا دقيقة_"
             if lang == "ar" else
             f"⏳ *Analyzing {pair} on {tf_name}...*\n\n"
             f"🔍 Fetching 3 timeframes...\n"
-            f"📊 Computing confluence...\n"
-            f"⚡ Scalping layer analysis...\n"
-            f"🤖 AI analyzing...\n\n"
+            f"📊 Computing 15+ weighted indicators...\n"
+            f"🧠 Smart Money analysis...\n"
+            f"⚡ Running scoring engine...\n"
+            f"🤖 Generating report...\n\n"
             f"_This may take a minute_"
         )
         await query.edit_message_text(wait_text, parse_mode="Markdown")
@@ -231,36 +232,37 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             from services.ai_engine   import analyze_and_signal
 
             frames     = await fetch_candles(pair, timeframe)
-            # نمرر الفريم لحساب SL والصلاحية بدقة
             indicators = compute_indicators(frames, timeframe)
             signal_text, is_wait = await analyze_and_signal(pair, timeframe, indicators, lang)
 
-            # تسجيل فقط إذا كانت توصية حقيقية
+            # Log the signal
+            sig = indicators["signal"]
             if not is_wait:
-                direction = "BUY" if "شراء" in signal_text or "BUY" in signal_text.upper() else "SELL"
-                db.log_signal(user_id, pair, timeframe, direction) 
+                direction = sig["direction"]
+                db.log_signal(user_id, pair, timeframe, direction)
             else:
-                db.update_last_signal(user_id)  # cooldown حتى للانتظار
-
+                db.update_last_signal(user_id)
 
             pro  = db.is_pro(user_id)
             used = db.free_signals_used(user_id)
 
-            # مدة الصلاحية محسوبة بدقة من ATR
-            validity_minutes = indicators.get("validity_minutes", 60)
+            validity_minutes = indicators["trade"].get("validity_minutes", 60)
+            score = sig["score"]
 
             if lang == "ar":
-                header = f"📡 *توصية {pair_info['emoji']} {pair_name} — {tf_name}*\n{'━'*30}\n\n"
+                header = f"📡 *{pair_info['emoji']} {pair_name} — {tf_name}*\n{'━'*30}\n\n"
                 footer = (
                     f"\n\n{'━'*30}\n"
-                    f"⏰ _صالحة لمدة: {validity_minutes} دقيقة من الآن_\n"
+                    f"🧠 _نقاط الثقة: {score}/100_\n"
+                    f"⏰ _صالحة: {validity_minutes} دقيقة_\n"
                     f"_{'⭐ برو — غير محدود' if pro else f'🆓 استخدمت {used}/{FREE_SIGNALS} مجانية'}_"
                 )
             else:
-                header = f"📡 *Signal: {pair_info['emoji']} {pair} — {tf_name}*\n{'━'*30}\n\n"
+                header = f"📡 *{pair_info['emoji']} {pair} — {tf_name}*\n{'━'*30}\n\n"
                 footer = (
                     f"\n\n{'━'*30}\n"
-                    f"⏰ _Valid for: {validity_minutes} minutes from now_\n"
+                    f"🧠 _Confidence: {score}/100_\n"
+                    f"⏰ _Valid: {validity_minutes} min_\n"
                     f"_{'⭐ Pro — Unlimited' if pro else f'🆓 Used {used}/{FREE_SIGNALS} free'}_"
                 )
 
@@ -290,7 +292,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         except Exception as e:
             await query.edit_message_text(
-                f"❌ {'حدث خطأ' if lang=='ar' else 'Error'}.\n`{str(e)[:100]}`",
+                f"❌ {'حدث خطأ' if lang=='ar' else 'Error'}.\n`{str(e)[:150]}`",
                 parse_mode="Markdown",
                 reply_markup=home_keyboard(user_id)
             )
