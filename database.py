@@ -126,10 +126,11 @@ def check_cooldown(user_id) -> int:
     elapsed   = int(time.time()) - (row["last_signal"] or 0)
     remaining = COOLDOWN_SECONDS - elapsed
     return max(0, remaining)
+
 def update_last_signal(user_id):
+    """Update cooldown timer without logging a signal."""
     with db() as c:
         c.execute("UPDATE users SET last_signal=? WHERE id=?", (int(time.time()), user_id))
-
 
 def log_signal(user_id, pair, timeframe, direction):
     """يسجّل الصفقة — يستخدم is_pro() الفعلية وليس الـ plan field."""
