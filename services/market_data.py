@@ -84,7 +84,7 @@ async def _fetch(symbol: str, interval: str, size: int = 200) -> pd.DataFrame:
     for col in ["open", "high", "low", "close"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     if "volume" in df.columns:
-    df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0)
+        df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0)
 else:
     df["volume"] = 0
 
