@@ -1,10 +1,7 @@
 """
-ai_engine.py — Signal Formatter
-================================
-
-KEY CHANGE: The scoring engine in market_data.py already decided BUY/SELL/WAIT
-with a mathematical confidence score. The AI here ONLY formats the output
-into a clean, readable signal. It does NOT decide the direction.
+ai_engine.py — V6 Signal Formatter
+====================================
+Redesigned UI with confidence meter, risk rating, and cleaner layout.
 """
 
 import aiohttp
@@ -27,147 +24,20 @@ MTF_MAP_EN = {
     "1d":  {"trend": "Weekly", "structure": "Daily", "entry": "Daily"},
 }
 
-
-def _format_signal_ar(pair_name, timeframe, indicators):
-    """Format the signal output in Arabic — decision already made by math."""
-    sig = indicators["signal"]
-    trade = indicators["trade"]
-    mtf = MTF_MAP_AR.get(timeframe, MTF_MAP_AR["1h"])
-
-    direction = sig["direction"]
-    score = sig["score"]
-    strength = sig["strength"]
-
-    if direction == "BUY":
-        dir_text = "شراء 🟢"
-        dir_emoji = "🟢"
-    elif direction == "SELL":
-        dir_text = "بيع 🔴"
-        dir_emoji = "🔴"
-    else:
-        dir_text = "انتظار ⚪"
-        dir_emoji = "⚪"
-
-    strength_ar = {
-        "VERY_STRONG": "قوية جداً 💪💪",
-        "STRONG": "قوية 💪",
-        "MODERATE": "متوسطة ⚡",
-        "WEAK": "ضعيفة ⚠️",
-    }.get(strength, "—")
-
-    trend_ar = {"bullish": "صاعد 📈", "bearish": "هابط 📉", "neutral": "محايد ↔️"}.get(indicators["trend"], "—")
-    struct_ar = {"bullish": "صاعد (HH+HL)", "bearish": "هابط (LH+LL)",
-                 "choch_bullish": "انعكاس صاعد (CHoCH)", "choch_bearish": "انعكاس هابط (CHoCH)",
-                 "neutral": "محايد"}.get(indicators["structure"], "—")
-    macd_ar = "صاعد" if indicators["macd_direction"] == "bullish" else "هابط"
-    session_ar = {"London": "لندن 🇬🇧", "London-NY Overlap": "تداخل لندن-نيويورك 🔥",
-                  "New York": "نيويورك 🇺🇸", "Asia": "آسيا 🌏",
-                  "Late NY / Early Asia": "آسيا المبكرة 🌙"}.get(indicators["session"], indicators["session"])
-
-    # Build the top scoring indicators
-    bd = indicators.get("score_breakdown", [])
-    top_signals = [b for b in bd if "→ +" in b and float(b.split("+")[-1]) > 3][:5]
-
-    # Volume text
-    vol = indicators["volume"]
-    vol_text = {"bullish": f"شرائي x{vol['vol_ratio']}", "bearish": f"بيعي x{vol['vol_ratio']}",
-                "drying_up": "يجف ⚠️", "neutral": f"عادي x{vol['vol_ratio']}"}.get(vol["vol_confirm"], "—")
-
-    # Divergence
-    div = indicators["divergence"]
-    div_text = "لا يوجد"
-    if div["regular"] == "bullish": div_text = "تباعد صاعد 🔄"
-    elif div["regular"] == "bearish": div_text = "تباعد هابط 🔄"
-    elif div["hidden"] == "bullish": div_text = "تباعد خفي صاعد"
-    elif div["hidden"] == "bearish": div_text = "تباعد خفي هابط"
-
-    # Sweep
-    sweep = indicators["liquidity_sweep"]
-    sweep_text = ""
-    if sweep["bullish_sweep"]: sweep_text = "مسح سيولة صاعد 🎯"
-    elif sweep["bearish_sweep"]: sweep_text = "مسح سيولة هابط 🎯"
-
-    # Patterns
-    pat_texts = []
-    for name, _ in indicators.get("candle_patterns", []):
-        pat_map = {"bullish_engulfing": "ابتلاع صاعد", "bearish_engulfing": "ابتلاع هابط",
-                   "bullish_pin_bar": "بن بار صاعد", "bearish_pin_bar": "بن بار هابط",
-                   "morning_star": "نجمة الصباح", "evening_star": "نجمة المساء",
-                   "three_white_soldiers": "3 جنود بيض", "three_black_crows": "3 غربان سود"}
-        pat_texts.append(pat_map.get(name, name))
-
-    chop_text = "متذبذب ⚠️" if indicators["choppiness"] > 61.8 else ("متجه ✅" if indicators["choppiness"] < 38.2 else "متوسط")
-
-    result = f"""⚡ الإشارة: {dir_text}
-📊 الثقة: {score}/100 ({strength_ar})
-📈 الاتجاه ({mtf['trend']}): {trend_ar} ({indicators['trend_strength']:.0%})
-🏗 البنية ({mtf['structure']}): {struct_ar}
-
-━━ المؤشرات ━━
-RSI: {indicators['rsi']} | StochRSI: K={indicators['stoch_k']:.0f} D={indicators['stoch_d']:.0f}
-MACD: {macd_ar} | ADX: {indicators['adx']:.0f} (+DI={indicators['plus_di']:.0f} -DI={indicators['minus_di']:.0f})
-EMA: 9={'فوق' if indicators['ema9'] > indicators['ema21'] else 'تحت'} 21 | BB: {indicators['bb_position']}
-الزخم: {chop_text} (CI={indicators['choppiness']:.0f})
-الحجم: {vol_text}"""
-
-    if indicators.get("vwap"):
-        result += f"\nVWAP: {indicators['vwap']}"
-
-    result += f"""
-
-━━ التحليل الذكي ━━
-التباعد: {div_text}
-أوامر مؤسسية: {indicators['bull_order_blocks']} شرائي / {indicators['bear_order_blocks']} بيعي"""
-
-    if sweep_text:
-        result += f"\n{sweep_text}"
-    if pat_texts:
-        result += f"\nنماذج: {', '.join(pat_texts)}"
-
-    if direction != "WAIT":
-        res_text = " | ".join([str(r) for r in indicators["resistance"][:3]]) if indicators["resistance"] else "—"
-        sup_text = " | ".join([str(s) for s in indicators["support"][:3]]) if indicators["support"] else "—"
-        result += f"""
-
-━━ مستويات التداول ━━
-💰 الدخول: {trade['entry']}
-🛡 وقف الخسارة: {trade['sl']} ({trade['sl_dist']} نقطة)
-🎯 الهدف الأول: {trade['tp1']}
-🎯 الهدف الثاني: {trade['tp2']}
-📈 نسبة R/R: {trade['rr_ratio']}
-
-مقاومات: {res_text}
-دعوم: {sup_text}"""
-
-    result += f"""
-
-━━ ملخص القرار ━━
-الجلسة: {session_ar} ({indicators['liquidity']})"""
-
-    if direction == "WAIT":
-        result += "\n⏳ لا توجد إشارة واضحة — الشروط غير مكتملة. انتظر فرصة أفضل."
-    elif score >= 90:
-        result += f"\n✅ إشارة {dir_text} قوية جداً — {len([b for b in bd if '→ +' in b])} عوامل متوافقة."
-    elif score >= 75:
-        result += f"\n✅ إشارة {dir_text} قوية — ادخل بثقة."
-    else:
-        result += f"\n⚡ إشارة {dir_text} متوسطة — ادخل بحذر مع وقف خسارة محكم."
-
-    # Warnings
-    warnings = []
-    if indicators["choppiness"] > 61.8: warnings.append("سوق متذبذب")
-    if indicators["adx"] < 20: warnings.append("اتجاه ضعيف")
-    if indicators["session_mult"] < 0.8: warnings.append("سيولة منخفضة")
-    if sig["direction"] == "BUY" and indicators["trend"] == "bearish": warnings.append("عكس الاتجاه")
-    if sig["direction"] == "SELL" and indicators["trend"] == "bullish": warnings.append("عكس الاتجاه")
-    if warnings:
-        result += f"\n⚠️ تحذير: {' | '.join(warnings)}"
-
-    return result
+def _confidence_bar(score):
+    """Visual confidence meter."""
+    filled = int(score / 10)
+    empty = 10 - filled
+    if score >= 85:    color = "🟢"
+    elif score >= 70:  color = "🟢"
+    elif score >= 55:  color = "🟡"
+    elif score >= 40:  color = "🟠"
+    else:              color = "🔴"
+    bar = "█" * filled + "░" * empty
+    return f"{color} [{bar}] {score}/100"
 
 
 def _format_signal_en(pair_name, timeframe, indicators):
-    """Format the signal output in English — decision already made by math."""
     sig = indicators["signal"]
     trade = indicators["trade"]
     mtf = MTF_MAP_EN.get(timeframe, MTF_MAP_EN["1h"])
@@ -176,15 +46,16 @@ def _format_signal_en(pair_name, timeframe, indicators):
     score = sig["score"]
     strength = sig["strength"]
 
-    if direction == "BUY":    dir_text = "BUY 🟢"
-    elif direction == "SELL": dir_text = "SELL 🔴"
-    else:                     dir_text = "WAIT ⚪"
+    if direction == "BUY":    dir_text, dir_emoji = "BUY 🟢", "🟢"
+    elif direction == "SELL": dir_text, dir_emoji = "SELL 🔴", "🔴"
+    else:                     dir_text, dir_emoji = "WAIT ⚪", "⚪"
 
     strength_en = {"VERY_STRONG": "Very Strong 💪💪", "STRONG": "Strong 💪",
-                   "MODERATE": "Moderate ⚡", "WEAK": "Weak ⚠️"}.get(strength, "—")
+                   "MODERATE": "Moderate ⚡", "ENTRY": "Entry Signal 📍", "WEAK": "Weak ⚠️"}.get(strength, "—")
+
     trend_en = {"bullish": "Bullish 📈", "bearish": "Bearish 📉", "neutral": "Neutral ↔️"}.get(indicators["trend"], "—")
     struct_en = {"bullish": "Bullish (HH+HL)", "bearish": "Bearish (LH+LL)",
-                 "choch_bullish": "Bullish reversal (CHoCH)", "choch_bearish": "Bearish reversal (CHoCH)",
+                 "choch_bullish": "Bull reversal (CHoCH)", "choch_bearish": "Bear reversal (CHoCH)",
                  "neutral": "Neutral"}.get(indicators["structure"], "—")
     macd_en = "Bullish" if indicators["macd_direction"] == "bullish" else "Bearish"
 
@@ -206,21 +77,44 @@ def _format_signal_en(pair_name, timeframe, indicators):
 
     pat_texts = [name.replace("_", " ").title() for name, _ in indicators.get("candle_patterns", [])]
 
-    chop_text = "Choppy ⚠️" if indicators["choppiness"] > 61.8 else ("Trending ✅" if indicators["choppiness"] < 38.2 else "Mixed")
+    chop = indicators["choppiness"]
+    chop_text = "Choppy ⚠️" if chop > 61.8 else ("Trending ✅" if chop < 38.2 else "Mixed")
 
-    bd = indicators.get("score_breakdown", [])
+    # Momentum burst
+    mb = indicators.get("momentum_burst", {})
+    mb_text = ""
+    if mb.get("burst") == "bullish":
+        mb_text = f"\n🚀 Momentum Burst: Bullish ({mb['consecutive']} bars)"
+    elif mb.get("burst") == "bearish":
+        mb_text = f"\n🚀 Momentum Burst: Bearish ({mb['consecutive']} bars)"
+
+    # Volatility regime
+    vol_regime = indicators.get("volatility_regime", "normal")
+    vol_ratio_val = indicators.get("volatility_ratio", 1.0)
+    regime_text = {"explosive": "🔥 Explosive", "high": "📈 High", "low": "😴 Low", "normal": "📊 Normal"}.get(vol_regime, "Normal")
+
+    # EMA Ribbon
+    ribbon_dir = indicators.get("ema_ribbon_dir", "neutral")
+    ribbon_str = indicators.get("ema_ribbon_str", 0)
+    ribbon_text = ""
+    if ribbon_dir != "neutral" and ribbon_str > 0.5:
+        ribbon_text = f"\nEMA Ribbon: {ribbon_dir.title()} ({ribbon_str:.0%})"
 
     result = f"""⚡ Signal: {dir_text}
-📊 Confidence: {score}/100 ({strength_en})
+{_confidence_bar(score)}
+📊 Strength: {strength_en}
+
+━━ Market Context ━━
 📈 Trend ({mtf['trend']}): {trend_en} ({indicators['trend_strength']:.0%})
 🏗 Structure ({mtf['structure']}): {struct_en}
+🌡 Volatility: {regime_text} (×{vol_ratio_val:.1f})
+📊 Momentum: {chop_text} (CI={chop:.0f}){mb_text}
 
 ━━ Indicators ━━
 RSI: {indicators['rsi']} | StochRSI: K={indicators['stoch_k']:.0f} D={indicators['stoch_d']:.0f}
 MACD: {macd_en} | ADX: {indicators['adx']:.0f} (+DI={indicators['plus_di']:.0f} -DI={indicators['minus_di']:.0f})
 EMA: 9 {'above' if indicators['ema9'] > indicators['ema21'] else 'below'} 21 | BB: {indicators['bb_position']}
-Momentum: {chop_text} (CI={indicators['choppiness']:.0f})
-Volume: {vol_text}"""
+Volume: {vol_text}{ribbon_text}"""
 
     if indicators.get("vwap"):
         result += f"\nVWAP: {indicators['vwap']}"
@@ -229,7 +123,8 @@ Volume: {vol_text}"""
 
 ━━ Smart Money ━━
 Divergence: {div_text}
-Order Blocks: {indicators['bull_order_blocks']} bullish / {indicators['bear_order_blocks']} bearish"""
+Order Blocks: {indicators['bull_order_blocks']} bull / {indicators['bear_order_blocks']} bear
+FVG: {indicators['bull_fvg_count']} bull / {indicators['bear_fvg_count']} bear"""
 
     if sweep_text:
         result += f"\n{sweep_text}"
@@ -241,79 +136,233 @@ Order Blocks: {indicators['bull_order_blocks']} bullish / {indicators['bear_orde
         sup_text = " | ".join([str(s) for s in indicators["support"][:3]]) if indicators["support"] else "—"
         result += f"""
 
-━━ Trade Levels ━━
+━━ Trade Setup ━━
 💰 Entry: {trade['entry']}
 🛡 Stop Loss: {trade['sl']} ({trade['sl_dist']} pts)
 🎯 TP1: {trade['tp1']}
 🎯 TP2: {trade['tp2']}
+🎯 TP3: {trade['tp3']}
 📈 R/R: {trade['rr_ratio']}
+💼 Risk: {trade.get('risk_label', 'N/A')}
 
 Resistance: {res_text}
 Support: {sup_text}"""
 
+    # Top contributing factors
+    bd = indicators.get("score_breakdown", [])
+    top_factors = [b for b in bd if "→ +" in b and float(b.split("+")[-1]) > 3][:4]
+    if top_factors:
+        result += "\n\n━━ Key Drivers ━━"
+        for f in top_factors:
+            result += f"\n• {f}"
+
+    session_en = indicators["session"]
     result += f"""
 
-━━ Decision Summary ━━
-Session: {indicators['session']} ({indicators['liquidity']})"""
+━━ Decision ━━
+Session: {session_en} ({indicators['liquidity']})"""
 
     if direction == "WAIT":
-        result += "\n⏳ No clear setup — conditions not met. Wait for better opportunity."
-    elif score >= 90:
-        result += f"\n✅ Very strong {dir_text} — {len([b for b in bd if '→ +' in b])} factors aligned."
-    elif score >= 75:
+        bull_s, bear_s = sig.get("bull_score", 0), sig.get("bear_score", 0)
+        result += f"\n⏳ No clear edge — Bull: {bull_s} vs Bear: {bear_s}"
+        result += "\n💡 Tip: Try a different timeframe or wait for momentum."
+    elif score >= 85:
+        result += f"\n✅ Very strong {dir_text} — high confluence."
+    elif score >= 70:
         result += f"\n✅ Strong {dir_text} — enter with confidence."
+    elif score >= 55:
+        result += f"\n⚡ Moderate {dir_text} — enter with tight SL."
     else:
-        result += f"\n⚡ Moderate {dir_text} — enter cautiously with tight SL."
+        result += f"\n📍 Entry-level {dir_text} — small position, tight SL."
 
     warnings = []
     if indicators["choppiness"] > 61.8: warnings.append("Choppy market")
-    if indicators["adx"] < 20: warnings.append("Weak trend")
-    if indicators["session_mult"] < 0.8: warnings.append("Low liquidity")
+    if indicators["adx"] < 15: warnings.append("Weak trend")
+    if indicators["session_mult"] < 0.8: warnings.append("Low liquidity session")
     if sig["direction"] == "BUY" and indicators["trend"] == "bearish": warnings.append("Counter-trend")
     if sig["direction"] == "SELL" and indicators["trend"] == "bullish": warnings.append("Counter-trend")
+    if vol_regime == "explosive": warnings.append("High volatility — widen SL")
     if warnings:
-        result += f"\n⚠️ Warning: {' | '.join(warnings)}"
+        result += f"\n⚠️ {' | '.join(warnings)}"
+
+    return result
+
+
+def _format_signal_ar(pair_name, timeframe, indicators):
+    sig = indicators["signal"]
+    trade = indicators["trade"]
+    mtf = MTF_MAP_AR.get(timeframe, MTF_MAP_AR["1h"])
+
+    direction = sig["direction"]
+    score = sig["score"]
+    strength = sig["strength"]
+
+    if direction == "BUY":    dir_text = "شراء 🟢"
+    elif direction == "SELL": dir_text = "بيع 🔴"
+    else:                     dir_text = "انتظار ⚪"
+
+    strength_ar = {"VERY_STRONG": "قوية جداً 💪💪", "STRONG": "قوية 💪",
+                   "MODERATE": "متوسطة ⚡", "ENTRY": "إشارة دخول 📍", "WEAK": "ضعيفة ⚠️"}.get(strength, "—")
+
+    trend_ar = {"bullish": "صاعد 📈", "bearish": "هابط 📉", "neutral": "محايد ↔️"}.get(indicators["trend"], "—")
+    struct_ar = {"bullish": "صاعد (HH+HL)", "bearish": "هابط (LH+LL)",
+                 "choch_bullish": "انعكاس صاعد (CHoCH)", "choch_bearish": "انعكاس هابط (CHoCH)",
+                 "neutral": "محايد"}.get(indicators["structure"], "—")
+    macd_ar = "صاعد" if indicators["macd_direction"] == "bullish" else "هابط"
+
+    vol = indicators["volume"]
+    vol_text = {"bullish": f"شرائي x{vol['vol_ratio']}", "bearish": f"بيعي x{vol['vol_ratio']}",
+                "drying_up": "يجف ⚠️", "neutral": f"عادي x{vol['vol_ratio']}"}.get(vol["vol_confirm"], "—")
+
+    div = indicators["divergence"]
+    div_text = "لا يوجد"
+    if div["regular"] == "bullish": div_text = "تباعد صاعد 🔄"
+    elif div["regular"] == "bearish": div_text = "تباعد هابط 🔄"
+    elif div["hidden"] == "bullish": div_text = "تباعد خفي صاعد"
+    elif div["hidden"] == "bearish": div_text = "تباعد خفي هابط"
+
+    sweep = indicators["liquidity_sweep"]
+    sweep_text = ""
+    if sweep["bullish_sweep"]: sweep_text = "مسح سيولة صاعد 🎯"
+    elif sweep["bearish_sweep"]: sweep_text = "مسح سيولة هابط 🎯"
+
+    pat_texts = []
+    for name, _ in indicators.get("candle_patterns", []):
+        pat_map = {"bullish_engulfing": "ابتلاع صاعد", "bearish_engulfing": "ابتلاع هابط",
+                   "bullish_pin_bar": "بن بار صاعد", "bearish_pin_bar": "بن بار هابط",
+                   "morning_star": "نجمة الصباح", "evening_star": "نجمة المساء",
+                   "three_white_soldiers": "3 جنود بيض", "three_black_crows": "3 غربان سود",
+                   "hammer": "مطرقة", "shooting_star": "نجم ساقط",
+                   "bull_momentum_candle": "شمعة زخم صاعد", "bear_momentum_candle": "شمعة زخم هابط"}
+        pat_texts.append(pat_map.get(name, name))
+
+    chop = indicators["choppiness"]
+    chop_text = "متذبذب ⚠️" if chop > 61.8 else ("متجه ✅" if chop < 38.2 else "متوسط")
+
+    mb = indicators.get("momentum_burst", {})
+    mb_text = ""
+    if mb.get("burst") == "bullish": mb_text = f"\n🚀 زخم صاعد ({mb['consecutive']} شمعات)"
+    elif mb.get("burst") == "bearish": mb_text = f"\n🚀 زخم هابط ({mb['consecutive']} شمعات)"
+
+    vol_regime = indicators.get("volatility_regime", "normal")
+    vol_ratio_val = indicators.get("volatility_ratio", 1.0)
+    regime_text = {"explosive": "🔥 انفجاري", "high": "📈 عالي", "low": "😴 منخفض", "normal": "📊 عادي"}.get(vol_regime, "عادي")
+
+    session_ar = {"London": "لندن 🇬🇧", "London-NY Overlap": "تداخل لندن-نيويورك 🔥",
+                  "New York": "نيويورك 🇺🇸", "Asia": "آسيا 🌏",
+                  "Late NY / Early Asia": "آسيا المبكرة 🌙"}.get(indicators["session"], indicators["session"])
+
+    result = f"""⚡ الإشارة: {dir_text}
+{_confidence_bar(score)}
+📊 القوة: {strength_ar}
+
+━━ سياق السوق ━━
+📈 الاتجاه ({mtf['trend']}): {trend_ar} ({indicators['trend_strength']:.0%})
+🏗 البنية ({mtf['structure']}): {struct_ar}
+🌡 التذبذب: {regime_text} (×{vol_ratio_val:.1f})
+📊 الزخم: {chop_text} (CI={chop:.0f}){mb_text}
+
+━━ المؤشرات ━━
+RSI: {indicators['rsi']} | StochRSI: K={indicators['stoch_k']:.0f} D={indicators['stoch_d']:.0f}
+MACD: {macd_ar} | ADX: {indicators['adx']:.0f} (+DI={indicators['plus_di']:.0f} -DI={indicators['minus_di']:.0f})
+EMA: 9={'فوق' if indicators['ema9'] > indicators['ema21'] else 'تحت'} 21 | BB: {indicators['bb_position']}
+الحجم: {vol_text}"""
+
+    if indicators.get("vwap"):
+        result += f"\nVWAP: {indicators['vwap']}"
+
+    result += f"""
+
+━━ التحليل الذكي ━━
+التباعد: {div_text}
+أوامر مؤسسية: {indicators['bull_order_blocks']} شرائي / {indicators['bear_order_blocks']} بيعي
+FVG: {indicators['bull_fvg_count']} صاعد / {indicators['bear_fvg_count']} هابط"""
+
+    if sweep_text: result += f"\n{sweep_text}"
+    if pat_texts: result += f"\nنماذج: {', '.join(pat_texts)}"
+
+    if direction != "WAIT":
+        res_text = " | ".join([str(r) for r in indicators["resistance"][:3]]) if indicators["resistance"] else "—"
+        sup_text = " | ".join([str(s) for s in indicators["support"][:3]]) if indicators["support"] else "—"
+        result += f"""
+
+━━ خطة التداول ━━
+💰 الدخول: {trade['entry']}
+🛡 وقف الخسارة: {trade['sl']} ({trade['sl_dist']} نقطة)
+🎯 الهدف 1: {trade['tp1']}
+🎯 الهدف 2: {trade['tp2']}
+🎯 الهدف 3: {trade['tp3']}
+📈 نسبة R/R: {trade['rr_ratio']}
+💼 المخاطرة: {trade.get('risk_label', 'N/A')}
+
+مقاومات: {res_text}
+دعوم: {sup_text}"""
+
+    bd = indicators.get("score_breakdown", [])
+    top_factors = [b for b in bd if "→ +" in b and float(b.split("+")[-1]) > 3][:4]
+    if top_factors:
+        result += "\n\n━━ أهم العوامل ━━"
+        for f in top_factors:
+            result += f"\n• {f}"
+
+    result += f"""
+
+━━ ملخص القرار ━━
+الجلسة: {session_ar} ({indicators['liquidity']})"""
+
+    if direction == "WAIT":
+        bull_s, bear_s = sig.get("bull_score", 0), sig.get("bear_score", 0)
+        result += f"\n⏳ لا توجد أفضلية واضحة — شراء: {bull_s} vs بيع: {bear_s}"
+        result += "\n💡 جرّب إطار زمني آخر أو انتظر زخم واضح."
+    elif score >= 85:
+        result += f"\n✅ إشارة {dir_text} قوية جداً — توافق عالي."
+    elif score >= 70:
+        result += f"\n✅ إشارة {dir_text} قوية — ادخل بثقة."
+    elif score >= 55:
+        result += f"\n⚡ إشارة {dir_text} متوسطة — وقف خسارة محكم."
+    else:
+        result += f"\n📍 إشارة {dir_text} — حجم صغير ووقف محكم."
+
+    warnings = []
+    if indicators["choppiness"] > 61.8: warnings.append("سوق متذبذب")
+    if indicators["adx"] < 15: warnings.append("اتجاه ضعيف")
+    if indicators["session_mult"] < 0.8: warnings.append("سيولة منخفضة")
+    if sig["direction"] == "BUY" and indicators["trend"] == "bearish": warnings.append("عكس الاتجاه")
+    if sig["direction"] == "SELL" and indicators["trend"] == "bullish": warnings.append("عكس الاتجاه")
+    if vol_regime == "explosive": warnings.append("تذبذب عالي — وسّع الوقف")
+    if warnings:
+        result += f"\n⚠️ {' | '.join(warnings)}"
 
     return result
 
 
 async def analyze_and_signal(pair: str, timeframe: str, indicators: dict, lang: str = "ar") -> tuple:
-    """
-    Generate the signal output. The direction is ALREADY decided by the
-    scoring engine — this function formats it for display.
-
-    Falls back to local formatting if AI is unavailable.
-    """
     from config import PAIRS
     pair_info = PAIRS[pair]
     pair_name = pair_info["name_ar"] if lang == "ar" else pair_info["name_en"]
 
-    # The decision is already made by math
     sig = indicators["signal"]
     is_wait = sig["direction"] == "WAIT"
 
-    # Format locally (no AI dependency for the decision)
     if lang == "ar":
         result = _format_signal_ar(pair_name, timeframe, indicators)
     else:
         result = _format_signal_en(pair_name, timeframe, indicators)
 
-    # Optional: Use AI to generate a 1-sentence market insight
-    # This is purely cosmetic — the trade decision is locked
+    # Optional AI insight for non-WAIT signals
     try:
         if GROQ_KEY and sig["direction"] != "WAIT":
             insight = await _get_ai_insight(pair_name, timeframe, indicators, lang)
             if insight:
-                label = "💡 رؤية الذكاء الاصطناعي:" if lang == "ar" else "💡 AI Insight:"
+                label = "💡 رؤية AI:" if lang == "ar" else "💡 AI Insight:"
                 result += f"\n\n{label} {insight}"
     except Exception:
-        pass  # AI insight is optional — failure is fine
+        pass
 
     return result, is_wait
 
 
 async def _get_ai_insight(pair_name: str, timeframe: str, indicators: dict, lang: str) -> str:
-    """Get a 1-sentence AI market insight. The direction is already locked."""
     sig = indicators["signal"]
     top_factors = [b for b in indicators.get("score_breakdown", []) if "→ +" in b][:3]
 
