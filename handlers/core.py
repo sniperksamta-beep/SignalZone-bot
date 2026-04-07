@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 import database as db
-from config import PAIRS, TIMEFRAMES, FREE_SIGNALS, BOT_NAME, SUPPORT_USERNAME
+from config import PAIRS, TIMEFRAMES, FREE_SIGNALS, BOT_NAME, BOT_VERSION, SUPPORT_USERNAME
 import datetime
 
 def t(user_id, ar_text, en_text):
@@ -33,10 +33,11 @@ async def send_home(target, user_id, edit=False):
     if t(user_id, "ar", "en") == "ar":
         plan_badge = "⭐ برو — غير محدود" if pro else f"🆓 مجاني — {rem}/{FREE_SIGNALS} متبقية"
         text = (
-            f"📡 *{BOT_NAME}*\n\n"
-            f"🧠 محرك تحليل مؤسسي — 15+ مؤشر مرجّح\n"
-            f"📊 نظام نقاط 0-100 — الرياضيات تقرر\n"
-            f"⚡ طبقة Smart Money: Order Blocks + FVG + مسح السيولة\n\n"
+            f"📡 *{BOT_NAME} V{BOT_VERSION}*\n\n"
+            f"🧠 محرك تحليل مؤسسي — 20+ مؤشر مرجّح\n"
+            f"🚀 محسّن للسكالبينج — إشارات فعلية\n"
+            f"⚡ Smart Money + زخم + EMA Ribbon\n"
+            f"📊 3 أهداف ربح + تقييم مخاطر\n\n"
             f"*الأزواج المتاحة:*\n"
             + "\n".join([f"{v['emoji']} {v['name_ar']}" for v in PAIRS.values()])
             + f"\n\n━━━━━━━━━━━━━━━━\n"
@@ -46,19 +47,23 @@ async def send_home(target, user_id, edit=False):
         buttons = [
             [InlineKeyboardButton("📡 توصية جديدة", callback_data="new_signal")],
             [
-                InlineKeyboardButton("💎 اشتراك برو",  callback_data="show_plans"),
-                InlineKeyboardButton("📊 إحصائياتي",   callback_data="my_stats"),
+                InlineKeyboardButton("⚡ سكالب سريع", callback_data="quick_scalp"),
+                InlineKeyboardButton("📊 إحصائياتي", callback_data="my_stats"),
             ],
-            [InlineKeyboardButton("🆘 الدعم الفني",    url=f"https://t.me/{SUPPORT_USERNAME}")],
-            [InlineKeyboardButton("🌐 English",         callback_data="lang_en")],
+            [
+                InlineKeyboardButton("💎 اشتراك برو",  callback_data="show_plans"),
+                InlineKeyboardButton("🆘 الدعم الفني",  url=f"https://t.me/{SUPPORT_USERNAME}"),
+            ],
+            [InlineKeyboardButton("🌐 English", callback_data="lang_en")],
         ]
     else:
         plan_badge = "⭐ Pro — Unlimited" if pro else f"🆓 Free — {rem}/{FREE_SIGNALS} left"
         text = (
-            f"📡 *{BOT_NAME}*\n\n"
-            f"🧠 Institutional analysis engine — 15+ weighted indicators\n"
-            f"📊 0-100 scoring system — math decides\n"
-            f"⚡ Smart Money layer: Order Blocks + FVG + Liquidity Sweeps\n\n"
+            f"📡 *{BOT_NAME} V{BOT_VERSION}*\n\n"
+            f"🧠 Institutional engine — 20+ weighted indicators\n"
+            f"🚀 Optimized for scalping — real signals\n"
+            f"⚡ Smart Money + Momentum Burst + EMA Ribbon\n"
+            f"📊 3 TP targets + Risk assessment\n\n"
             f"*Available Pairs:*\n"
             + "\n".join([f"{v['emoji']} {v['name_en']}" for v in PAIRS.values()])
             + f"\n\n━━━━━━━━━━━━━━━━\n"
@@ -66,13 +71,16 @@ async def send_home(target, user_id, edit=False):
             f"👇 Tap *New Signal* to start"
         )
         buttons = [
-            [InlineKeyboardButton("📡 New Signal",   callback_data="new_signal")],
+            [InlineKeyboardButton("📡 New Signal", callback_data="new_signal")],
+            [
+                InlineKeyboardButton("⚡ Quick Scalp", callback_data="quick_scalp"),
+                InlineKeyboardButton("📊 My Stats",    callback_data="my_stats"),
+            ],
             [
                 InlineKeyboardButton("💎 Go Pro",    callback_data="show_plans"),
-                InlineKeyboardButton("📊 My Stats",  callback_data="my_stats"),
+                InlineKeyboardButton("🆘 Support",   url=f"https://t.me/{SUPPORT_USERNAME}"),
             ],
-            [InlineKeyboardButton("🆘 Support",      url=f"https://t.me/{SUPPORT_USERNAME}")],
-            [InlineKeyboardButton("🌐 العربية",       callback_data="lang_ar")],
+            [InlineKeyboardButton("🌐 العربية", callback_data="lang_ar")],
         ]
 
     keyboard = InlineKeyboardMarkup(buttons)
@@ -109,14 +117,16 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"📊 *إحصائياتك*\n\n"
                 f"الخطة: *{'⭐ برو' if pro else '🆓 مجاني'}*\n"
                 f"توصيات مجانية: `{used}/{FREE_SIGNALS}`\n"
-                f"إجمالي: `{total}`"
+                f"إجمالي: `{total}`\n"
+                f"الإصدار: `V{BOT_VERSION}`"
             )
         else:
             text = (
                 f"📊 *Your Stats*\n\n"
                 f"Plan: *{'⭐ Pro' if pro else '🆓 Free'}*\n"
                 f"Free used: `{used}/{FREE_SIGNALS}`\n"
-                f"Total: `{total}`"
+                f"Total: `{total}`\n"
+                f"Version: `V{BOT_VERSION}`"
             )
         extra = [] if pro else [[InlineKeyboardButton(
             t(user_id, "💎 ترقية إلى برو", "💎 Upgrade to Pro"),
@@ -127,6 +137,49 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=home_keyboard(user_id, extra)
         )
         return
+
+    # Quick Scalp — XAUUSD 5m one-tap
+    if data == "quick_scalp":
+        if not db.can_use(user_id):
+            text = (
+                f"⚠️ *{'استنفدت التوصيات المجانية' if t(user_id,'ar','en')=='ar' else 'Free signals used up'}*"
+            )
+            await query.edit_message_text(text, parse_mode="Markdown",
+                reply_markup=home_keyboard(user_id, [[
+                    InlineKeyboardButton(t(user_id, "💎 برو", "💎 Pro"), callback_data="show_plans")
+                ]]))
+            return
+
+        remaining = db.check_cooldown(user_id)
+        if remaining > 0:
+            m, s = remaining // 60, remaining % 60
+            await query.edit_message_text(
+                f"⏳ *{'انتظر' if t(user_id,'ar','en')=='ar' else 'Wait'} {m}:{s:02d}*",
+                parse_mode="Markdown", reply_markup=home_keyboard(user_id))
+            return
+
+        # Show pair selection for quick scalp
+        buttons = []
+        for pair_key, pair_info in PAIRS.items():
+            name = pair_info["name_ar"] if t(user_id,"ar","en") == "ar" else pair_info["name_en"]
+            buttons.append([InlineKeyboardButton(
+                f"⚡ {pair_info['emoji']} {name}",
+                callback_data=f"scalp_{pair_key}"
+            )])
+        label = "⚡ سكالب سريع — اختر الزوج:" if t(user_id,"ar","en") == "ar" else "⚡ Quick Scalp — Choose pair:"
+        await query.edit_message_text(
+            f"*{label}*", parse_mode="Markdown",
+            reply_markup=home_keyboard(user_id, buttons)
+        )
+        return
+
+    # Quick scalp execution — auto 5m
+    if data.startswith("scalp_"):
+        pair = data.replace("scalp_", "")
+        ctx.user_data["selected_pair"] = pair
+        # Jump straight to analysis with 5m
+        data = "tf_5m"
+        # Fall through to tf_ handler below
 
     if data == "new_signal":
         if not db.can_use(user_id):
@@ -211,18 +264,16 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         wait_text = (
             f"⏳ *جارٍ تحليل {pair_name} على {tf_name}...*\n\n"
             f"🔍 جلب 3 فريمات متزامنة...\n"
-            f"📊 حساب 15+ مؤشر مرجّح...\n"
-            f"🧠 تحليل Smart Money...\n"
-            f"⚡ تشغيل محرك النقاط...\n"
-            f"🤖 توليد التقرير...\n\n"
-            f"_قد يستغرق هذا دقيقة_"
+            f"📊 حساب 20+ مؤشر...\n"
+            f"🧠 تحليل Smart Money + Momentum...\n"
+            f"⚡ محرك النقاط V6...\n\n"
+            f"_قد يستغرق دقيقة_"
             if lang == "ar" else
             f"⏳ *Analyzing {pair} on {tf_name}...*\n\n"
             f"🔍 Fetching 3 timeframes...\n"
-            f"📊 Computing 15+ weighted indicators...\n"
-            f"🧠 Smart Money analysis...\n"
-            f"⚡ Running scoring engine...\n"
-            f"🤖 Generating report...\n\n"
+            f"📊 Computing 20+ indicators...\n"
+            f"🧠 Smart Money + Momentum analysis...\n"
+            f"⚡ V6 Scoring Engine...\n\n"
             f"_This may take a minute_"
         )
         await query.edit_message_text(wait_text, parse_mode="Markdown")
@@ -235,7 +286,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             indicators = compute_indicators(frames, timeframe)
             signal_text, is_wait = await analyze_and_signal(pair, timeframe, indicators, lang)
 
-            # Log the signal
             sig = indicators["signal"]
             if not is_wait:
                 direction = sig["direction"]
@@ -269,19 +319,30 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             full_text = header + signal_text + footer
             chunks    = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
 
-            extra_buttons = [[InlineKeyboardButton(
-                t(user_id, "📡 توصية جديدة", "📡 New Signal"),
-                callback_data="new_signal"
-            )]]
+            # After-signal action buttons
+            extra_buttons = [
+                [
+                    InlineKeyboardButton(
+                        t(user_id, "🔄 نفس الزوج", "🔄 Same Pair"),
+                        callback_data=f"pair_{pair}"
+                    ),
+                    InlineKeyboardButton(
+                        t(user_id, "📡 توصية جديدة", "📡 New Signal"),
+                        callback_data="new_signal"
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        t(user_id, "⚡ سكالب سريع", "⚡ Quick Scalp"),
+                        callback_data="quick_scalp"
+                    ),
+                ],
+            ]
             if not pro:
                 extra_buttons.append([InlineKeyboardButton(
                     t(user_id, "💎 اشتراك برو", "💎 Go Pro"),
                     callback_data="show_plans"
                 )])
-            extra_buttons.append([InlineKeyboardButton(
-                t(user_id, "🆘 الدعم الفني", "🆘 Support"),
-                url=f"https://t.me/{SUPPORT_USERNAME}"
-            )])
 
             await query.edit_message_text(
                 chunks[0], parse_mode="Markdown",
