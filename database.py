@@ -87,7 +87,7 @@ def is_pro(user_id) -> bool:
 
 def is_banned(user_id) -> bool:
     row = get_user(user_id)
-    return bool(row and row.get("banned", 0))
+    return bool(row and row["banned"])
 
 def _get_free_used(user_id) -> int:
     row = get_user(user_id)
