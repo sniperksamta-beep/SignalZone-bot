@@ -82,9 +82,9 @@ async def _fetch(symbol: str, interval: str, size: int = 200) -> pd.DataFrame:
     for col in ["open", "high", "low", "close"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     if "volume" in df:
-    df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0)
+        df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0)
     else:
-    df["volume"] = 0
+        df["volume"] = 0
     df = df[["open", "high", "low", "close", "volume"]].dropna()
     df = df.iloc[::-1].reset_index(drop=True)
     return df
