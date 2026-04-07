@@ -1,14 +1,14 @@
 """
-handlers/payment.py — الدفع + إدارة المشتركين
+handlers/payment.py — V6 Payment + Enhanced Admin Panel
 """
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 import database as db
-import datetime
+import datetime, time
 from config import (
     YOUR_USDT_TRC20, YOUR_USDT_ERC20, YOUR_BTC, YOUR_ETH, YOUR_BNB, YOUR_SOL,
-    PRICE_MONTHLY, PRICE_3MONTH, ADMIN_IDS, BOT_NAME
+    PRICE_MONTHLY, PRICE_3MONTH, ADMIN_IDS, BOT_NAME, BOT_VERSION
 )
 from handlers.core import home_keyboard, t
 
@@ -51,8 +51,7 @@ async def plans_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("buy_"):
         plan_key = data.replace("buy_", "")
         plan     = PLANS.get(plan_key)
-        if not plan:
-            return
+        if not plan: return
         ctx.user_data["plan_key"] = plan_key
         wallets = get_wallets(user_id)
         title   = f"💳 {'اختر طريقة الدفع' if t(user_id,'ar','en')=='ar' else 'Choose payment method'}\n{'المبلغ' if t(user_id,'ar','en')=='ar' else 'Amount'}: *{plan['price']}$*"
@@ -66,8 +65,7 @@ async def plans_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         plan     = PLANS.get(plan_key)
         wallets  = get_wallets(user_id)
         wallet   = wallets.get(coin_key)
-        if not plan or not wallet:
-            return
+        if not plan or not wallet: return
 
         pay_id = db.add_payment(user_id, plan_key, plan["price"], coin_key, wallet["address"])
         ctx.user_data["pay_months"] = plan["months"]
@@ -114,14 +112,14 @@ async def plans_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def _show_plans(target, user_id, edit=False):
     if t(user_id,"ar","en") == "ar":
         text = (f"💎 *اشتراك {BOT_NAME} برو*\n\n🆓 *مجاني:* 4 توصيات فقط\n\n"
-                f"⭐ *برو:*\n• توصيات غير محدودة\n• تحليل 3 فريمات\n• جميع الأزواج\n\n*اختر خطة:*")
+                f"⭐ *برو:*\n• توصيات غير محدودة\n• تحليل 3 فريمات\n• جميع الأزواج\n• سكالب سريع\n\n*اختر خطة:*")
         buttons = [
             [InlineKeyboardButton(f"⭐ شهر — {PRICE_MONTHLY}$",         callback_data="buy_pro_1m")],
             [InlineKeyboardButton(f"💰 3 أشهر — {PRICE_3MONTH}$ (وفّر 15$)", callback_data="buy_pro_3m")],
         ]
     else:
         text = (f"💎 *{BOT_NAME} Pro*\n\n🆓 *Free:* 4 signals only\n\n"
-                f"⭐ *Pro:*\n• Unlimited signals\n• 3-TF analysis\n• All pairs\n\n*Choose plan:*")
+                f"⭐ *Pro:*\n• Unlimited signals\n• 3-TF analysis\n• All pairs\n• Quick Scalp\n\n*Choose plan:*")
         buttons = [
             [InlineKeyboardButton(f"⭐ 1 Month — ${PRICE_MONTHLY}",          callback_data="buy_pro_1m")],
             [InlineKeyboardButton(f"💰 3 Months — ${PRICE_3MONTH} (save $15)", callback_data="buy_pro_3m")],
@@ -133,11 +131,10 @@ async def _show_plans(target, user_id, edit=False):
         await target.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
 
-# ── أوامر الإدارة ─────────────────────────────────────────────────
+# ── ADMIN COMMANDS ────────────────────────────────────────────────
 
 async def confirm_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        return
+    if update.effective_user.id not in ADMIN_IDS: return
     args = ctx.args
     if len(args) < 3:
         await update.message.reply_text("Usage: /confirm {pay_id} {user_id} {months}")
@@ -161,28 +158,20 @@ async def confirm_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def adddays_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """
-    /adddays {user_id} {days}
-    يضيف أياماً مجانية لمستخدم.
-    """
-    if update.effective_user.id not in ADMIN_IDS:
-        return
+    if update.effective_user.id not in ADMIN_IDS: return
     args = ctx.args
     if len(args) < 2:
         await update.message.reply_text("Usage: /adddays {user_id} {days}")
         return
     try:
-        user_id = int(args[0])
-        days    = int(args[1])
+        user_id, days = int(args[0]), int(args[1])
     except ValueError:
         await update.message.reply_text("Invalid args.")
         return
-
     success = db.add_days(user_id, days)
     if not success:
         await update.message.reply_text(f"❌ User {user_id} not found.")
         return
-
     row = db.get_user(user_id)
     exp = datetime.datetime.fromtimestamp(row["plan_expires"]).strftime("%d/%m/%Y")
     try:
@@ -197,61 +186,50 @@ async def adddays_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def userinfo_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """
-    /userinfo {user_id أو username}
-    عرض معلومات مستخدم.
-    """
-    if update.effective_user.id not in ADMIN_IDS:
-        return
+    if update.effective_user.id not in ADMIN_IDS: return
     args = ctx.args
     if not args:
         await update.message.reply_text("Usage: /userinfo {user_id or username}")
         return
-
     row = db.search_user(args[0])
     if not row:
         await update.message.reply_text(f"❌ User '{args[0]}' not found.")
         return
-
-    pro = row["plan"] == "pro" and row["plan_expires"] > __import__("time").time()
+    pro = row["plan"] == "pro" and row["plan_expires"] > time.time()
     exp = datetime.datetime.fromtimestamp(row["plan_expires"]).strftime("%d/%m/%Y") if row["plan_expires"] else "—"
     joined = datetime.datetime.fromtimestamp(row["joined"]).strftime("%d/%m/%Y") if row["joined"] else "—"
-
     text = (
-        f"👤 *معلومات المستخدم*\n\n"
+        f"👤 *User Info*\n\n"
         f"ID: `{row['id']}`\n"
         f"Username: @{row['username'] or '—'}\n"
-        f"الاسم: {row['name'] or '—'}\n"
-        f"اللغة: {row['lang']}\n"
-        f"انضم: {joined}\n\n"
-        f"الخطة: *{'⭐ برو' if pro else '🆓 مجاني'}*\n"
-        f"تنتهي: {exp}\n"
-        f"توصيات مجانية: {row['free_used']}/4\n"
-        f"إجمالي التوصيات: {row['total_signals']}\n\n"
-        f"*أوامر الإدارة:*\n"
-        f"`/adddays {row['id']} 30` — أضف 30 يوم\n"
-        f"`/confirm {row['id']} {row['id']} 1` — فعّل شهر\n"
+        f"Name: {row['name'] or '—'}\n"
+        f"Lang: {row['lang']}\n"
+        f"Joined: {joined}\n\n"
+        f"Plan: *{'⭐ Pro' if pro else '🆓 Free'}*\n"
+        f"Expires: {exp}\n"
+        f"Free used: {row['free_used']}/4\n"
+        f"Total signals: {row['total_signals']}\n\n"
+        f"*Quick actions:*\n"
+        f"`/adddays {row['id']} 30` — add 30 days\n"
+        f"`/adddays {row['id']} 7` — add 7 days\n"
+        f"`/resetfree {row['id']}` — reset free signals\n"
+        f"`/ban {row['id']}` — ban user"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def users_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """
-    /users — عرض آخر 20 مستخدم
-    """
-    if update.effective_user.id not in ADMIN_IDS:
-        return
+    if update.effective_user.id not in ADMIN_IDS: return
     rows = db.get_all_users(20)
-    now  = __import__("time").time()
+    now  = time.time()
     if not rows:
-        await update.message.reply_text("لا يوجد مستخدمون بعد.")
+        await update.message.reply_text("No users yet.")
         return
-    lines = [f"👥 *آخر {len(rows)} مستخدم:*\n"]
+    lines = [f"👥 *Last {len(rows)} users:*\n"]
     for r in rows:
         pro   = "⭐" if (r["plan"]=="pro" and r["plan_expires"] > now) else "🆓"
         uname = f"@{r['username']}" if r["username"] else r["name"] or "—"
-        lines.append(f"{pro} `{r['id']}` — {uname} — {r['total_signals']} توصية")
-    # تقسيم الرسالة إذا كانت طويلة
+        lines.append(f"{pro} `{r['id']}` — {uname} — {r['total_signals']} signals")
     full = "\n".join(lines)
     chunks = [full[i:i+3500] for i in range(0, len(full), 3500)]
     for chunk in chunks:
@@ -259,55 +237,90 @@ async def users_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def stats_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        return
+    if update.effective_user.id not in ADMIN_IDS: return
     pending = db.pending_payments()
+    today_signals = db.signals_today()
     text = (
-        f"📊 *إحصائيات الإدارة*\n\n"
-        f"المستخدمون: `{db.all_users_count()}`\n"
-        f"المشتركون (برو): `{db.pro_users_count()}`\n"
-        f"إجمالي التوصيات: `{db.total_signals_count()}`\n"
-        f"مدفوعات معلقة: `{len(pending)}`\n\n"
-        f"*الأوامر:*\n"
-        f"`/users` — آخر المستخدمين\n"
-        f"`/userinfo {{id}}` — معلومات مستخدم\n"
-        f"`/adddays {{id}} {{days}}` — أيام مجانية\n"
-        f"`/confirm {{pay_id}} {{user_id}} {{months}}` — تأكيد دفع"
+        f"📊 *Admin Dashboard — V{BOT_VERSION}*\n\n"
+        f"👥 Total users: `{db.all_users_count()}`\n"
+        f"⭐ Pro users: `{db.pro_users_count()}`\n"
+        f"📡 Total signals: `{db.total_signals_count()}`\n"
+        f"📡 Today: `{today_signals}`\n"
+        f"💰 Pending payments: `{len(pending)}`\n\n"
+        f"*Commands:*\n"
+        f"`/users` — recent users\n"
+        f"`/userinfo {{id}}` — user details\n"
+        f"`/adddays {{id}} {{days}}` — add free days\n"
+        f"`/confirm {{pay_id}} {{user_id}} {{months}}` — confirm payment\n"
+        f"`/resetfree {{id}}` — reset free signal counter\n"
+        f"`/broadcast {{message}}` — message all users\n"
+        f"`/forcerestart` — send restart to all"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
-async def broadcast_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """
-    /broadcast {رسالتك هنا}
-    يرسل رسالة لجميع مستخدمي البوت.
-    """
-    if update.effective_user.id not in ADMIN_IDS:
+async def resetfree_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Reset free signal counter for a user."""
+    if update.effective_user.id not in ADMIN_IDS: return
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Usage: /resetfree {user_id}")
         return
+    try:
+        user_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("Invalid user ID.")
+        return
+    success = db.reset_free(user_id)
+    if success:
+        await update.message.reply_text(f"✅ Reset free signals for user {user_id}.")
+        try:
+            lang = db.get_lang(user_id)
+            msg = "🎁 *تم إعادة تعيين توصياتك المجانية!*" if lang == "ar" else "🎁 *Your free signals have been reset!*"
+            await ctx.bot.send_message(user_id, msg, parse_mode="Markdown")
+        except Exception:
+            pass
+    else:
+        await update.message.reply_text(f"❌ User {user_id} not found.")
 
+
+async def ban_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ban/unban a user."""
+    if update.effective_user.id not in ADMIN_IDS: return
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Usage: /ban {user_id}")
+        return
+    try:
+        user_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("Invalid user ID.")
+        return
+    is_banned = db.toggle_ban(user_id)
+    status = "banned 🚫" if is_banned else "unbanned ✅"
+    await update.message.reply_text(f"User {user_id} is now {status}.")
+
+
+async def broadcast_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
     if not ctx.args:
         await update.message.reply_text(
-            "Usage: /broadcast رسالتك هنا\n\n"
-            "مثال: /broadcast تم تحديث البوت! أرسل /start للمتابعة."
+            "Usage: /broadcast your message here\n\n"
+            "Example: /broadcast Bot updated! Send /start to continue."
         )
         return
 
     message = " ".join(ctx.args)
     users   = db.get_all_users(limit=9999)
+    sent, failed, blocked = 0, 0, 0
 
-    sent    = 0
-    failed  = 0
-    blocked = 0
-
-    status_msg = await update.message.reply_text(
-        f"📤 جارٍ الإرسال لـ {len(users)} مستخدم..."
-    )
+    status_msg = await update.message.reply_text(f"📤 Sending to {len(users)} users...")
 
     for user in users:
         try:
             await ctx.bot.send_message(
                 user["id"],
-                f"📢 *رسالة من الإدارة*\n\n{message}",
+                f"📢 *{BOT_NAME}*\n\n{message}",
                 parse_mode="Markdown"
             )
             sent += 1
@@ -317,65 +330,42 @@ async def broadcast_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 blocked += 1
             else:
                 failed += 1
-
-        # تأخير صغير لتجنب حظر تيليغرام
         import asyncio
         await asyncio.sleep(0.05)
 
     await status_msg.edit_text(
-        f"✅ *تم الإرسال*\n\n"
-        f"وصل: `{sent}`\n"
-        f"محجوب/محذوف: `{blocked}`\n"
-        f"فشل: `{failed}`\n"
-        f"الإجمالي: `{len(users)}`",
+        f"✅ *Broadcast complete*\n\n"
+        f"Sent: `{sent}`\n"
+        f"Blocked: `{blocked}`\n"
+        f"Failed: `{failed}`",
         parse_mode="Markdown"
     )
 
 
 async def forcerestart_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """
-    /forcerestart — يرسل لكل المستخدمين رسالة ترحيب جديدة
-    تُعيد تشغيل تجربة البوت لديهم تلقائياً.
-    """
-    if update.effective_user.id not in ADMIN_IDS:
-        return
-
+    if update.effective_user.id not in ADMIN_IDS: return
     users = db.get_all_users(limit=9999)
     if not users:
-        await update.message.reply_text("❌ لا يوجد مستخدمون.")
+        await update.message.reply_text("❌ No users.")
         return
 
-    status_msg = await update.message.reply_text(
-        f"🔄 جارٍ إعادة تشغيل البوت لـ {len(users)} مستخدم..."
-    )
-
+    status_msg = await update.message.reply_text(f"🔄 Restarting for {len(users)} users...")
     sent = failed = blocked = 0
 
     for user in users:
         lang = db.get_lang(user["id"])
         try:
             if lang == "ar":
-                text = (
-                    f"🔄 *تم تحديث {BOT_NAME}!*\n\n"
-                    f"اضغط الزر أدناه للعودة للرئيسية والاستمرار."
-                )
+                text = f"🔄 *تم تحديث {BOT_NAME} إلى V{BOT_VERSION}!*\n\nاضغط أدناه للمتابعة."
                 btn_label = "🏠 ابدأ من جديد"
             else:
-                text = (
-                    f"🔄 *{BOT_NAME} has been updated!*\n\n"
-                    f"Tap the button below to return to home."
-                )
+                text = f"🔄 *{BOT_NAME} updated to V{BOT_VERSION}!*\n\nTap below to continue."
                 btn_label = "🏠 Restart"
 
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton(btn_label, callback_data="go_home")
             ]])
-
-            await ctx.bot.send_message(
-                user["id"], text,
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
+            await ctx.bot.send_message(user["id"], text, parse_mode="Markdown", reply_markup=keyboard)
             sent += 1
         except Exception as e:
             err = str(e).lower()
@@ -383,14 +373,10 @@ async def forcerestart_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 blocked += 1
             else:
                 failed += 1
-
         import asyncio
         await asyncio.sleep(0.05)
 
     await status_msg.edit_text(
-        f"✅ *تم إعادة التشغيل*\n\n"
-        f"وصل: `{sent}`\n"
-        f"محجوب/محذوف: `{blocked}`\n"
-        f"فشل: `{failed}`",
+        f"✅ *Restart sent*\n\nDelivered: `{sent}`\nBlocked: `{blocked}`\nFailed: `{failed}`",
         parse_mode="Markdown"
     )
