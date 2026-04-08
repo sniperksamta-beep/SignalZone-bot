@@ -87,7 +87,7 @@ def is_pro(user_id) -> bool:
 
 def is_banned(user_id) -> bool:
     row = get_user(user_id)
-    return bool(row and row.get("banned", 0))
+    return bool(row and row["banned"])
 
 def _get_free_used(user_id) -> int:
     row = get_user(user_id)
@@ -167,7 +167,7 @@ def toggle_ban(user_id) -> bool:
     """Toggle ban status. Returns True if now banned."""
     row = get_user(user_id)
     if not row: return False
-    new_val = 0 if row.get("banned", 0) else 1
+    new_val = 0 if row["banned"] else 1
     with db() as c:
         c.execute("UPDATE users SET banned=? WHERE id=?", (new_val, user_id))
     return bool(new_val)
