@@ -4,6 +4,50 @@ import database as db
 from config import PAIRS, TIMEFRAMES, FREE_SIGNALS, BOT_NAME, BOT_VERSION, SUPPORT_USERNAME
 import datetime
 
+import re, logging
+_log = logging.getLogger(__name__)
+
+def _sanitize_markdown(text: str) -> str:
+    """Fix common broken Markdown that Telegram rejects."""
+    # Ensure even number of each inline marker so entities close properly
+    for ch in ['`', '*', '_']:
+        if text.count(ch) % 2 != 0:
+            text = text + ch          # close the dangling entity
+    return text
+
+def _smart_chunks(text: str, limit: int = 4000) -> list[str]:
+    """Split text at newlines instead of mid-entity."""
+    if len(text) <= limit:
+        return [text]
+    chunks, current = [], ""
+    for line in text.split('\n'):
+        if len(current) + len(line) + 1 > limit and current:
+            chunks.append(_sanitize_markdown(current))
+            current = line
+        else:
+            current = current + '\n' + line if current else line
+    if current:
+        chunks.append(_sanitize_markdown(current))
+    return chunks or [text]
+
+async def _safe_edit(msg, text, **kwargs):
+    """Try Markdown first, fall back to plain text on parse error."""
+    try:
+        return await msg.edit_text(text, parse_mode="Markdown", **kwargs)
+    except Exception as e:
+        if "parse entities" in str(e).lower() or "can't find end" in str(e).lower():
+            _log.warning("Markdown parse failed, sending as plain text")
+            return await msg.edit_text(text, **kwargs)
+        raise
+
+async def _safe_reply(msg, text, **kwargs):
+    try:
+        return await msg.reply_text(text, parse_mode="Markdown", **kwargs)
+    except Exception as e:
+        if "parse entities" in str(e).lower() or "can't find end" in str(e).lower():
+            return await msg.reply_text(text, **kwargs)
+        raise
+
 def t(user_id, ar_text, en_text):
     lang = db.get_lang(user_id)
     return ar_text if lang == "ar" else en_text
@@ -256,6 +300,33 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await send_home(query, user_id, edit=True)
             return
 
+        # Cooldown check (was missing here — users bypassed via Same Pair)
+        remaining = db.check_cooldown(user_id)
+        if remaining > 0:
+            m, s = remaining // 60, remaining % 60
+            text = (
+                f"⏳ *انتظر {m}:{s:02d} دقيقة*\n\n"
+                f"فترة انتظار بين كل توصية والأخرى لضمان جودة التحليل."
+                if t(user_id,"ar","en") == "ar" else
+                f"⏳ *Wait {m}:{s:02d} minutes*\n\n"
+                f"Cooldown between signals to ensure analysis quality."
+            )
+            await query.edit_message_text(
+                text, parse_mode="Markdown",
+                reply_markup=home_keyboard(user_id)
+            )
+            return
+
+        if not db.can_use(user_id):
+            text = (
+                f"⚠️ *{'استنفدت التوصيات المجانية' if t(user_id,'ar','en')=='ar' else 'Free signals used up'}*"
+            )
+            await query.edit_message_text(text, parse_mode="Markdown",
+                reply_markup=home_keyboard(user_id, [[
+                    InlineKeyboardButton(t(user_id, "💎 برو", "💎 Pro"), callback_data="show_plans")
+                ]]))
+            return
+
         pair_info = PAIRS[pair]
         lang      = db.get_lang(user_id)
         pair_name = pair_info["name_ar"] if lang == "ar" else pair_info["name_en"]
@@ -317,7 +388,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
 
             full_text = header + signal_text + footer
-            chunks    = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
+            chunks    = _smart_chunks(full_text, 4000)
 
             # After-signal action buttons
             extra_buttons = [
@@ -344,17 +415,18 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     callback_data="show_plans"
                 )])
 
-            await query.edit_message_text(
-                chunks[0], parse_mode="Markdown",
+            await _safe_edit(
+                query.message, chunks[0],
                 reply_markup=home_keyboard(user_id, extra_buttons)
             )
             for chunk in chunks[1:]:
-                await query.message.reply_text(chunk, parse_mode="Markdown")
+                await _safe_reply(query.message, chunk)
 
         except Exception as e:
-            await query.edit_message_text(
-                f"❌ {'حدث خطأ' if lang=='ar' else 'Error'}.\n`{str(e)[:150]}`",
-                parse_mode="Markdown",
+            err_msg = str(e)[:150].replace('`', "'")
+            await _safe_edit(
+                query.message,
+                f"❌ {'حدث خطأ' if lang=='ar' else 'Error'}.\n`{err_msg}`",
                 reply_markup=home_keyboard(user_id)
             )
             raise
