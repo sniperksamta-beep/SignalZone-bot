@@ -14,7 +14,7 @@ from handlers.payment import (
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.FileHandler("tradeai.log"), logging.StreamHandler()]
+    handlers=[logging.StreamHandler()]
 )
 
 def main():
